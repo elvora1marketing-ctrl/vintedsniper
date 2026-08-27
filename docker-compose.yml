@@ -1,0 +1,17 @@
+services:
+  sniper:
+    build: .
+    image: vinted-sniper:latest
+    container_name: vinted-sniper
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Watches und die Liste bereits gemeldeter Artikel überleben so jeden Neustart.
+      - ./data:/app/data
+    # Chromium braucht beim Fallback kurzzeitig spürbar Speicher.
+    shm_size: 512mb
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

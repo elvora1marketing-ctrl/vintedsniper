@@ -1,0 +1,15 @@
+.git/
+.gitignore
+.env
+data/
+tests/
+README.md
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
