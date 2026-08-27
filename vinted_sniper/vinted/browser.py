@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +87,26 @@ class BrowserUnavailable(RuntimeError):
     """Playwright fehlt oder der Browser lässt sich nicht starten."""
 
 
+def playwright_proxy(proxy_url: str) -> dict[str, str]:
+    """`http://user:pass@host:port` in Playwrights Proxy-Format übersetzen.
+
+    Playwright erwartet Zugangsdaten in eigenen Feldern und ignoriert sie, wenn
+    sie in der Server-URL stecken. Bei fast allen Residential-Proxies gehören
+    Zugangsdaten dazu — ohne diese Aufteilung schlägt jede Anfrage fehl.
+    """
+    parts = urlsplit(proxy_url if "://" in proxy_url else f"http://{proxy_url}")
+    server = f"{parts.scheme}://{parts.hostname or ''}"
+    if parts.port:
+        server += f":{parts.port}"
+
+    config = {"server": server}
+    if parts.username:
+        config["username"] = unquote(parts.username)
+    if parts.password:
+        config["password"] = unquote(parts.password)
+    return config
+
+
 class BrowserFetcher:
     """Hält einen Chromium offen und holt darin die Katalog-Antworten."""
 
@@ -130,7 +150,7 @@ class BrowserFetcher:
         try:
             self._browser = await self._playwright.chromium.launch(
                 headless=True,
-                proxy={"server": self.proxy} if self.proxy else None,
+                proxy=playwright_proxy(self.proxy) if self.proxy else None,
                 args=[
                     "--no-sandbox",
                     "--disable-dev-shm-usage",

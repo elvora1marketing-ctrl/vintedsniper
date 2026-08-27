@@ -86,6 +86,8 @@ class VintedSession:
     """Eine wiederverwendbare, selbstheilende Session für genau einen Host."""
 
     MAX_ATTEMPTS = 4
+    # Ruhezeit, nachdem eine IP-Sperre festgestellt wurde.
+    IP_BLOCK_COOLDOWN = 600.0
 
     def __init__(self, host: str, settings: Settings) -> None:
         self.host = host
@@ -104,6 +106,10 @@ class VintedSession:
         # langsamer, aber die Alternative ist, gar keine Treffer zu bekommen.
         self._browser: BrowserFetcher | None = None
         self._browser_mode = False
+        # Steht die IP auf Vinteds Sperrliste, hilft kein Wiederholen. Statt im
+        # Sekundentakt weiterzuklopfen (und das Log zuzumüllen), wird für eine
+        # Weile gar nicht erst angefragt.
+        self._blocked_until = 0.0
 
     # ------------------------------------------------------------------ Status
 
@@ -114,6 +120,9 @@ class VintedSession:
         )
 
     def status_line(self) -> str:
+        remaining = self._blocked_until - time.monotonic()
+        if remaining > 0:
+            return f"IP gesperrt, Pause noch {int(remaining / 60)} Min"
         if self._browser_mode:
             state = "Browser-Modus"
         elif self._session is None:
@@ -258,8 +267,9 @@ class VintedSession:
             await fetcher.start()
         except BrowserUnavailable as exc:
             await fetcher.close()
-            # Kein Browser heißt: es gibt keinen Weg mehr, der noch offen wäre.
-            self._playwright_available = False
+            # Wenn selbst ein echter Browser abgewiesen wird, liegt es nicht am
+            # Fingerprint, sondern an der IP. Weiterprobieren bringt nichts.
+            self._blocked_until = time.monotonic() + self.IP_BLOCK_COOLDOWN
             self._browser_mode = False
             raise Blocked(str(exc)) from exc
         except Exception as exc:
@@ -299,6 +309,7 @@ class VintedSession:
         if self._consecutive_blocks:
             log.info("[%s] Browser-Modus liefert wieder Daten.", self.host)
         self._consecutive_blocks = 0
+        self._blocked_until = 0.0
         return payload
 
     # ------------------------------------------------------------------ Requests
@@ -310,6 +321,14 @@ class VintedSession:
         Browser-Fallback nichts durchgeht.
         """
         async with self._lock:
+            remaining = self._blocked_until - time.monotonic()
+            if remaining > 0:
+                raise Blocked(
+                    f"{self.host} sperrt diese IP. Nächster Versuch in "
+                    f"{int(remaining / 60)} Min. Ein Proxy (PROXIES in der .env) "
+                    "oder ein Betrieb außerhalb des Rechenzentrums löst das."
+                )
+
             last_error: Exception | None = None
 
             for attempt in range(1, self.MAX_ATTEMPTS + 1):
@@ -404,6 +423,7 @@ class VintedSession:
                     continue
 
                 self._consecutive_blocks = 0
+                self._blocked_until = 0.0
                 return payload
 
             raise last_error or VintedError("Unbekannter Fehler.")
