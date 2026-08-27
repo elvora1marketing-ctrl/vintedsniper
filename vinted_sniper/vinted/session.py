@@ -11,19 +11,22 @@ nicht zu dem User-Agent passen, den man behauptet zu sein. Deshalb:
   die die API erwartet.
 * **Automatischer Refresh** — bei 401 wird das Token über den regulären
   Web-Endpunkt erneuert statt eine neue Session aufzumachen.
-* **Playwright-Fallback** — wenn der HTTP-Bootstrap an einer Challenge
-  scheitert, holt ein echter Headless-Chromium die Cookies und übergibt sie an
-  die HTTP-Session.
+* **Browser-Modus** — blockt Vinted den HTTP-Weg zweimal in Folge, laufen alle
+  weiteren Abfragen dauerhaft in einem echten Chromium (siehe `browser.py`).
+  Cookies aus dem Browser in einen HTTP-Client zu tragen reicht gegen Datadome
+  nicht; die Anfrage muss tatsächlich aus dem Browser kommen.
 * **Proxy-Rotation und Backoff** — bei 403/429 wird die Ausgangs-IP gewechselt
   und exponentiell zurückgefahren, statt stumpf weiterzuhämmern.
 
 Es gibt keinen Zustand, in dem der Sniper dauerhaft „tot" ist: jeder Blocker
-löst einen Reparaturpfad aus.
+löst einen Reparaturpfad aus. Was hier allerdings niemand lösen kann, ist eine
+gesperrte Server-IP — dagegen hilft ausschließlich ein Proxy.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -33,6 +36,7 @@ from curl_cffi.requests import AsyncSession
 
 from ..config import Settings
 from . import domains
+from .browser import BrowserFetcher, BrowserUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -96,19 +100,30 @@ class VintedSession:
         self._playwright_available = settings.playwright_fallback
         self._limiter = RateLimiter(settings.rate_limit_per_domain)
 
+        # Sobald HTTP zuverlässig blockt, läuft alles über den Browser. Der ist
+        # langsamer, aber die Alternative ist, gar keine Treffer zu bekommen.
+        self._browser: BrowserFetcher | None = None
+        self._browser_mode = False
+
     # ------------------------------------------------------------------ Status
 
     @property
     def healthy(self) -> bool:
-        return self._session is not None and self._consecutive_blocks == 0
+        return self._consecutive_blocks == 0 and (
+            self._session is not None or self._browser_mode
+        )
 
     def status_line(self) -> str:
-        if self._session is None:
+        if self._browser_mode:
+            state = "Browser-Modus"
+        elif self._session is None:
             return "nicht initialisiert"
+        else:
+            state = "HTTP"
         if self._consecutive_blocks:
-            return f"blockiert ({self._consecutive_blocks}× in Folge)"
+            return f"{state}, blockiert ({self._consecutive_blocks}× in Folge)"
         age = int(time.monotonic() - self._bootstrapped_at)
-        return f"ok (Session {age}s alt)"
+        return f"{state}, ok (Session {age}s alt)"
 
     # ------------------------------------------------------------- Netzwerk-Setup
 
@@ -147,104 +162,39 @@ class VintedSession:
 
     # ---------------------------------------------------------------- Bootstrap
 
-    async def _bootstrap(self, *, force_browser: bool = False) -> None:
-        """Frische Session mit gültigen Cookies herstellen."""
+    async def _bootstrap(self) -> None:
+        """Frische HTTP-Session mit gültigen Cookies herstellen.
+
+        Wirft `Blocked`, wenn Vinted schon die Startseite verweigert — dann
+        übernimmt der Browser-Modus.
+        """
         await self.close()
         session = await self._new_session()
 
-        if not force_browser:
-            try:
-                response = await session.get(
-                    f"https://{self.host}/",
-                    headers=self._base_headers(),
-                    allow_redirects=True,
-                )
-            except Exception as exc:  # Netzwerk, DNS, Proxy …
-                await session.close()
-                raise VintedError(f"Verbindung zu {self.host} fehlgeschlagen: {exc}") from exc
-
-            body = response.text[:4000].lower()
-            challenged = response.status_code in (403, 429) or any(
-                marker in body for marker in _CHALLENGE_MARKERS
+        try:
+            response = await session.get(
+                f"https://{self.host}/",
+                headers=self._base_headers(),
+                allow_redirects=True,
             )
-            if not challenged and response.status_code < 400:
-                self._session = session
-                self._bootstrapped_at = time.monotonic()
-                log.info("[%s] Session per HTTP aufgebaut.", self.host)
-                return
+        except Exception as exc:  # Netzwerk, DNS, Proxy …
+            await session.close()
+            raise VintedError(f"Verbindung zu {self.host} fehlgeschlagen: {exc}") from exc
 
-            log.warning(
-                "[%s] HTTP-Bootstrap blockiert (HTTP %s) — versuche Browser-Fallback.",
-                self.host,
-                response.status_code,
-            )
-
-        # HTTP-Weg blockiert: echten Browser die Challenge lösen lassen.
-        cookies = await self._cookies_via_browser()
-        if cookies is None:
+        body = response.text[:4000].lower()
+        challenged = response.status_code in (403, 429) or any(
+            marker in body for marker in _CHALLENGE_MARKERS
+        )
+        if challenged or response.status_code >= 400:
             await session.close()
             raise Blocked(
-                f"{self.host} verweigert den Zugriff und der Browser-Fallback "
-                "steht nicht zur Verfügung."
+                f"{self.host} verweigert schon die Startseite "
+                f"(HTTP {response.status_code})."
             )
-        for name, value in cookies.items():
-            session.cookies.set(name, value, domain="." + self.host.removeprefix("www."))
+
         self._session = session
         self._bootstrapped_at = time.monotonic()
-        log.info("[%s] Session per Headless-Browser aufgebaut.", self.host)
-
-    async def _cookies_via_browser(self) -> dict[str, str] | None:
-        """Cookies mit echtem Chromium holen (löst JS-Challenges mit)."""
-        if not self._playwright_available:
-            return None
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            log.warning("Playwright ist nicht installiert — Browser-Fallback deaktiviert.")
-            self._playwright_available = False
-            return None
-
-        proxy_config = None
-        if self.settings.proxies:
-            proxy_config = {
-                "server": self.settings.proxies[
-                    self._proxy_index % len(self.settings.proxies)
-                ]
-            }
-
-        try:
-            async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(
-                    headless=True,
-                    proxy=proxy_config,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                )
-                try:
-                    context = await browser.new_context(
-                        locale=self.domain.language,
-                        viewport={"width": 1440, "height": 900},
-                    )
-                    page = await context.new_page()
-                    await page.goto(
-                        f"https://{self.host}/",
-                        wait_until="domcontentloaded",
-                        timeout=45_000,
-                    )
-                    # Challenges brauchen einen Moment, bis sie ihre Cookies setzen.
-                    await page.wait_for_timeout(5_000)
-                    jar = await context.cookies()
-                finally:
-                    await browser.close()
-        except Exception as exc:
-            log.error("[%s] Browser-Fallback fehlgeschlagen: %s", self.host, exc)
-            return None
-
-        cookies = {c["name"]: c["value"] for c in jar if c.get("value")}
-        return cookies or None
+        log.info("[%s] Session per HTTP aufgebaut.", self.host)
 
     async def _refresh_token(self) -> bool:
         """Access-Token über den regulären Web-Endpunkt erneuern."""
@@ -277,6 +227,80 @@ class VintedSession:
         if self._session is None:
             await self._bootstrap()
 
+    # -------------------------------------------------------------- Browser-Modus
+
+    async def _enable_browser_mode(self) -> None:
+        """Dauerhaft auf Abfragen im echten Browser umstellen."""
+        if not self._browser_mode:
+            log.warning(
+                "[%s] HTTP wird durchgehend blockiert — schalte auf Browser-Modus um.",
+                self.host,
+            )
+            self._browser_mode = True
+        await self._restart_browser()
+
+    async def _restart_browser(self) -> None:
+        if self._browser is not None:
+            await self._browser.close()
+            self._browser = None
+
+        proxy = None
+        if self.settings.proxies:
+            proxy = self.settings.proxies[self._proxy_index % len(self.settings.proxies)]
+
+        fetcher = BrowserFetcher(
+            self.host,
+            language=self.domain.language,
+            proxy=proxy,
+            timeout=max(self.settings.request_timeout, 45.0),
+        )
+        try:
+            await fetcher.start()
+        except BrowserUnavailable as exc:
+            await fetcher.close()
+            # Kein Browser heißt: es gibt keinen Weg mehr, der noch offen wäre.
+            self._playwright_available = False
+            self._browser_mode = False
+            raise Blocked(str(exc)) from exc
+        except Exception as exc:
+            await fetcher.close()
+            raise Blocked(f"Browser-Sitzung fehlgeschlagen: {exc}") from exc
+
+        self._browser = fetcher
+        self._bootstrapped_at = time.monotonic()
+
+    async def _get_json_via_browser(
+        self, path: str, params: dict[str, str]
+    ) -> dict[str, Any]:
+        if self._browser is None or not self._browser.running:
+            await self._restart_browser()
+        assert self._browser is not None
+
+        await self._limiter.acquire()
+        status, body = await self._browser.fetch_json(path, params)
+
+        if status in (403, 429):
+            raise Blocked(f"HTTP {status} von {self.host} (Browser-Modus).")
+        if status == 0:
+            raise Blocked(f"Browser-Abfrage fehlgeschlagen: {body[:200]}")
+        if status >= 500:
+            raise Blocked(f"Vinted-Serverfehler (HTTP {status}).")
+        if status >= 400:
+            raise VintedError(
+                f"Vinted antwortet mit HTTP {status}. Stimmen die Filter in "
+                "der Such-URL?"
+            )
+
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise Blocked(f"Antwort war kein JSON: {exc}") from exc
+
+        if self._consecutive_blocks:
+            log.info("[%s] Browser-Modus liefert wieder Daten.", self.host)
+        self._consecutive_blocks = 0
+        return payload
+
     # ------------------------------------------------------------------ Requests
 
     async def get_json(self, path: str, params: dict[str, str]) -> dict[str, Any]:
@@ -289,7 +313,30 @@ class VintedSession:
             last_error: Exception | None = None
 
             for attempt in range(1, self.MAX_ATTEMPTS + 1):
-                await self._ensure_session()
+                if self._browser_mode:
+                    try:
+                        return await self._get_json_via_browser(path, params)
+                    except Blocked as exc:
+                        last_error = exc
+                        self._consecutive_blocks += 1
+                        self._rotate_proxy()
+                        await self._backoff(attempt)
+                        await self._restart_browser()
+                        continue
+
+                try:
+                    await self._ensure_session()
+                except Blocked as exc:
+                    last_error = exc
+                    self._consecutive_blocks += 1
+                    log.warning("[%s] %s", self.host, exc)
+                    if self._playwright_available:
+                        await self._enable_browser_mode()
+                        continue
+                    self._rotate_proxy()
+                    await self._backoff(attempt)
+                    continue
+
                 await self._limiter.acquire()
                 assert self._session is not None
 
@@ -329,9 +376,13 @@ class VintedSession:
                     )
                     self._rotate_proxy()
                     await self._backoff(attempt)
-                    # Nach dem zweiten Block direkt den Browser ranlassen — der
-                    # reine HTTP-Bootstrap kommt an dieser Challenge nicht vorbei.
-                    await self._bootstrap(force_browser=self._consecutive_blocks >= 2)
+                    # Zwei Blockaden in Folge heißen: HTTP kommt hier nicht
+                    # durch. Ab dann läuft alles im Browser — Cookies allein
+                    # reichen gegen diese Erkennung nicht.
+                    if self._consecutive_blocks >= 2 and self._playwright_available:
+                        await self._enable_browser_mode()
+                    else:
+                        await self._bootstrap()
                     continue
 
                 if status >= 500:
@@ -377,6 +428,9 @@ class VintedSession:
             except Exception:
                 pass
             self._session = None
+        if self._browser is not None:
+            await self._browser.close()
+            self._browser = None
 
 
 class SessionPool:
