@@ -5,18 +5,86 @@ als Alert mit Direktlink in einen Channel postet — für vinted.de und jede and
 Länderdomain (`.fr`, `.pl`, `.co.uk`, `.it`, …).
 
 Du legst die Suche auf der Vinted-Website an, kopierst die URL aus der
-Adresszeile und wirfst sie dem Bot mit `/watch add` hin. Alle Filter — Marke,
-Größe, Preis, Kategorie, Zustand — kommen automatisch mit.
+Adresszeile und gibst sie dem Sniper. Alle Filter — Marke, Größe, Preis,
+Kategorie, Zustand — kommen automatisch mit.
+
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue) ![Betrieb](https://img.shields.io/badge/Betrieb-Docker-informational)
+
+## Zwei Wege, dasselbe Ergebnis
+
+|  | **Webhook-Modus** | **Bot-Modus** |
+| --- | --- | --- |
+| Aufwand | Webhook-URL kopieren, fertig | Bot anlegen, Token, Einladung, Rechte |
+| Suchen anlegen | Zeile in `searches.toml` | `/watch add` direkt in Discord |
+| Ändern | Datei bearbeiten + Neustart | Slash-Command, sofort wirksam |
+| Alerts | Embed mit Links | Embed mit Buttons |
+| Braucht | `ALERT_WEBHOOK_URL` | `DISCORD_TOKEN` |
+
+Du kannst mit dem Webhook anfangen und das Bot-Token später ergänzen — beides
+zusammen geht auch, dann laufen Slash-Commands und Datei-Suchen nebeneinander.
+Die Datenbank bleibt dieselbe, es geht nichts verloren.
+
+---
+
+## Schnellstart A — Webhook (schnellster Weg)
+
+Kein Bot, kein Token, keine Rechtevergabe.
+
+**1. Webhook in Discord anlegen:** Channel-Einstellungen (Zahnrad neben dem
+Channel) → *Integrationen* → *Webhooks* → *Neuer Webhook* → **Webhook-URL
+kopieren**.
+
+**2. Projekt einrichten:**
+
+```bash
+git clone https://github.com/elvora1marketing-ctrl/vintedsniper.git
+cd vintedsniper
+cp .env.example .env
+cp searches.example.toml searches.toml
+```
+
+In die `.env` nur diese eine Zeile:
+
+```
+ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/…
+```
+
+**3. Suchen eintragen** in `searches.toml`:
+
+```toml
+[[search]]
+name = "Nike Air Max"
+url = "https://www.vinted.de/catalog?search_text=nike+air+max&price_to=60"
+
+[[search]]
+name = "Carhartt FR"
+url = "https://www.vinted.fr/catalog?search_text=carhartt&price_to=80"
+interval = 120
+```
+
+**4. Starten:**
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
+
+Im Channel erscheint sofort eine Startmeldung mit allen aktiven Suchen — daran
+siehst du, dass der Webhook stimmt, ohne auf den ersten Treffer zu warten.
+
+> Lege `searches.toml` **vor** dem ersten Start an. Fehlt die Datei, legt Docker
+> an ihrer Stelle ein Verzeichnis an. Falls doch passiert:
+> `docker compose down && rm -rf searches.toml && cp searches.example.toml searches.toml`
+
+---
+
+## Schnellstart B — Bot mit Slash-Commands
+
+Mehr Einrichtung, dafür legst du Suchen direkt in Discord an:
 
 ```
 /watch add url:https://www.vinted.de/catalog?search_text=nike+air+max&price_to=60
 ```
-
-![Ablauf](https://img.shields.io/badge/Python-3.11%2B-blue) ![Lizenz](https://img.shields.io/badge/Betrieb-Docker-informational)
-
----
-
-## Schnellstart
 
 ### 1. Discord-Bot anlegen
 
@@ -36,6 +104,7 @@ Privilegierte Intents brauchst du **nicht** — der Bot liest keine Nachrichten.
 git clone https://github.com/elvora1marketing-ctrl/vintedsniper.git
 cd vintedsniper
 cp .env.example .env
+cp searches.example.toml searches.toml   # auch im Bot-Modus nötig (Docker-Mount)
 $EDITOR .env          # DISCORD_TOKEN und DISCORD_GUILD_ID eintragen
 ```
 
@@ -55,7 +124,7 @@ Läuft. In Discord jetzt `/watch add` tippen.
 
 ---
 
-## Befehle
+## Befehle (nur Bot-Modus)
 
 | Befehl | Wirkung |
 | --- | --- |
@@ -77,7 +146,8 @@ anpassen.
 1. Auf [vinted.de](https://www.vinted.de) die Suche zusammenklicken: Suchbegriff
    eingeben, links Marke, Größe, Zustand, Preis setzen.
 2. Wenn die Ergebnisliste passt: komplette Adresszeile kopieren.
-3. `/watch add url:<einfügen>`
+3. Einfügen — im Bot-Modus als `/watch add url:<einfügen>`, im Webhook-Modus
+   als `url = "<einfügen>"` in `searches.toml`.
 
 Der Parser übernimmt `search_text`, `catalog_ids`, `brand_ids`, `size_ids`,
 `status_ids`, `color_ids`, `material_ids`, `price_from`, `price_to` und
@@ -87,20 +157,37 @@ nutzlos.
 
 ### Was der erste Durchlauf macht
 
-Beim Anlegen liest der Bot den aktuellen Bestand ein und meldet ihn **nicht** —
-sonst würdest du bei jeder neuen Suche sofort 20 Alerts für Altbestand bekommen.
-Ab dem zweiten Durchlauf kommt nur noch, was wirklich neu eingestellt wurde.
+Beim Anlegen liest der Sniper den aktuellen Bestand ein und meldet ihn
+**nicht** — sonst würdest du bei jeder neuen Suche sofort 20 Alerts für
+Altbestand bekommen. Ab dem zweiten Durchlauf kommt nur noch, was wirklich neu
+eingestellt wurde.
+
+Bei einem Neustart passiert das **nicht** noch einmal: welche Artikel schon
+gemeldet wurden, steht in der Datenbank. Eine Suche, die es vorher schon gab,
+meldet nach dem Neustart sofort wieder normal.
 
 ---
 
 ## Andere Länderdomains
 
 Einfach die URL der jeweiligen Domain einwerfen — Währung und Sprache erkennt
-der Bot selbst:
+der Sniper selbst. Mehrere Länder parallel sind kein Problem:
 
 ```
 /watch add url:https://www.vinted.fr/catalog?search_text=carhartt&price_to=40
 /watch add url:https://www.vinted.pl/catalog?search_text=nike&price_to=150
+```
+
+Im Webhook-Modus dasselbe in `searches.toml`:
+
+```toml
+[[search]]
+name = "Carhartt FR"
+url = "https://www.vinted.fr/catalog?search_text=carhartt&price_to=40"
+
+[[search]]
+name = "Nike PL"
+url = "https://www.vinted.pl/catalog?search_text=nike&price_to=150"
 ```
 
 Bekannt sind `de, at, fr, be, lu, nl, es, it, pt, ie, gr, fi, sk, lt, co.uk, pl,
@@ -149,12 +236,14 @@ Bot einmal im Channel und wieder, sobald es läuft.
 
 ## Konfiguration
 
-Alles über `.env` (siehe `.env.example`):
+Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_URL` oder `DISCORD_TOKEN` muss gesetzt sein:
 
 | Variable | Standard | Bedeutung |
 | --- | --- | --- |
-| `DISCORD_TOKEN` | — | **Pflicht.** Bot-Token. |
+| `ALERT_WEBHOOK_URL` | — | Webhook-URL für Alerts. Ohne `DISCORD_TOKEN` ist das der Betriebsmodus. |
+| `DISCORD_TOKEN` | — | Bot-Token. Gesetzt = Slash-Commands. |
 | `DISCORD_GUILD_ID` | — | Server-ID für sofortige Command-Registrierung. |
+| `SEARCHES_PATH` | `searches.toml` | Suchdefinitionen für den Webhook-Modus. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
 | `MIN_INTERVAL` | `20` | Untergrenze, die `/watch interval` nicht unterschreitet. |
 | `PER_PAGE` | `20` | Artikel pro Abfrage. |
@@ -177,7 +266,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium      # nur für den Fallback nötig
-python -m vinted_sniper
+python -m vinted_sniper       # Modus ergibt sich aus der .env
 ```
 
 Als systemd-Unit (`/etc/systemd/system/vinted-sniper.service`):
@@ -204,9 +293,13 @@ WantedBy=multi-user.target
 
 ```
 vinted_sniper/
-├── config.py            Einstellungen aus der .env
+├── config.py            Einstellungen aus der .env, Moduswahl
 ├── db.py                SQLite: Suchen + bereits gemeldete Artikel
 ├── monitor.py           Polling-Schleife, ein Task pro Suche
+├── searches.py          searches.toml lesen und mit der DB abgleichen
+├── notifiers.py         Alert-Zustellung per Webhook
+├── runner.py            Webhook-Modus (ohne Bot-Token)
+├── embeds.py            Discord-Darstellung (beide Modi)
 ├── vinted/
 │   ├── domains.py       Länderdomains, Währungen, Host-Prüfung
 │   ├── urls.py          Such-URL → API-Parameter
@@ -215,8 +308,7 @@ vinted_sniper/
 │   └── models.py        Artikel-Datenmodell
 └── bot/
     ├── bot.py           Bot-Klasse, Alert-Zustellung
-    ├── commands.py      Slash-Commands
-    └── embeds.py        Discord-Darstellung
+    └── commands.py      Slash-Commands
 ```
 
 Die Daten liegen in `data/sniper.db` (per Volume gemountet) und überleben jeden
@@ -229,8 +321,10 @@ Gemeldete Artikel-IDs werden nach sieben Tagen aufgeräumt.
 python3 -m unittest discover -s tests -v
 ```
 
-Deckt URL-Parsing, Domain-/Host-Prüfung und das Artikel-Modell ab — also die
-Logik, die ohne Netzwerkzugriff prüfbar ist.
+Deckt URL-Parsing, Domain- und Host-Prüfung, das Artikel-Modell, das Lesen von
+`searches.toml` sowie Datenbank und Datei-Abgleich ab — also die Logik, die
+ohne Netzwerkzugriff prüfbar ist. Die Datenbanktests laufen gegen einen
+schlanken `aiosqlite`-Ersatz auf `sqlite3`-Basis (`tests/aiosqlite_stub.py`).
 
 ## Hinweise
 

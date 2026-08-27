@@ -1,4 +1,5 @@
 .env
+searches.toml
 data/
 *.db
 *.db-wal

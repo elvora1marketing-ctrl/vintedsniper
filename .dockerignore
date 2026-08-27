@@ -3,6 +3,8 @@
 .env
 data/
 tests/
+searches.toml
+searches.example.toml
 README.md
 *.db
 *.db-wal

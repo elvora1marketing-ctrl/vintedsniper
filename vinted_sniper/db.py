@@ -26,7 +26,11 @@ CREATE TABLE IF NOT EXISTS watches (
     created_at      INTEGER NOT NULL,
     last_checked_at INTEGER,
     last_error      TEXT,
-    hits            INTEGER NOT NULL DEFAULT 0
+    hits            INTEGER NOT NULL DEFAULT 0,
+    -- Eigenes Alert-Ziel; leer = über den Bot in `channel_id`.
+    webhook_url     TEXT    NOT NULL DEFAULT '',
+    -- 'command' = per /watch add angelegt, 'file' = aus searches.toml.
+    origin          TEXT    NOT NULL DEFAULT 'command'
 );
 
 CREATE TABLE IF NOT EXISTS seen_items (
@@ -57,6 +61,8 @@ class Watch:
     last_checked_at: int | None
     last_error: str | None
     hits: int
+    webhook_url: str = ""
+    origin: str = "command"
 
     @property
     def query(self) -> SearchQuery:
@@ -84,6 +90,8 @@ class Watch:
             last_checked_at=row["last_checked_at"],
             last_error=row["last_error"],
             hits=row["hits"],
+            webhook_url=row["webhook_url"] or "",
+            origin=row["origin"] or "command",
         )
 
 
@@ -106,7 +114,26 @@ class Database:
         # WAL überlebt harte Neustarts deutlich besser als der Default.
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """Fehlende Spalten nachrüsten, ohne bestehende Daten anzufassen.
+
+        `CREATE TABLE IF NOT EXISTS` lässt eine bereits vorhandene Tabelle in
+        Ruhe — eine Datenbank aus einer älteren Version hätte sonst die neuen
+        Spalten nie.
+        """
+        assert self._conn is not None
+        async with self._conn.execute("PRAGMA table_info(watches)") as cursor:
+            existing = {row["name"] for row in await cursor.fetchall()}
+
+        for column, ddl in (
+            ("webhook_url", "ALTER TABLE watches ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''"),
+            ("origin", "ALTER TABLE watches ADD COLUMN origin TEXT NOT NULL DEFAULT 'command'"),
+        ):
+            if column not in existing:
+                await self._conn.execute(ddl)
 
     @property
     def conn(self) -> aiosqlite.Connection:
@@ -131,13 +158,15 @@ class Database:
         query: SearchQuery,
         source_url: str,
         interval: int,
+        webhook_url: str = "",
+        origin: str = "command",
     ) -> Watch:
         cursor = await self.conn.execute(
             """
             INSERT INTO watches
                 (guild_id, channel_id, creator_id, name, host, source_url,
-                 query_json, interval, enabled, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                 query_json, interval, enabled, created_at, webhook_url, origin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             """,
             (
                 guild_id,
@@ -149,12 +178,49 @@ class Database:
                 serialize_query(query),
                 interval,
                 int(time.time()),
+                webhook_url,
+                origin,
             ),
         )
         await self.conn.commit()
         watch = await self.get_watch(cursor.lastrowid)
         assert watch is not None
         return watch
+
+    async def update_file_watch(
+        self,
+        watch_id: int,
+        *,
+        query: SearchQuery,
+        source_url: str,
+        interval: int,
+        webhook_url: str,
+    ) -> None:
+        """Eine aus der Datei stammende Suche an die geänderte Datei angleichen."""
+        await self.conn.execute(
+            """
+            UPDATE watches
+               SET host = ?, source_url = ?, query_json = ?, interval = ?,
+                   webhook_url = ?, enabled = 1
+             WHERE id = ?
+            """,
+            (
+                query.host,
+                source_url,
+                serialize_query(query),
+                interval,
+                webhook_url,
+                watch_id,
+            ),
+        )
+        await self.conn.commit()
+
+    async def list_file_watches(self) -> list[Watch]:
+        async with self.conn.execute(
+            "SELECT * FROM watches WHERE origin = 'file' ORDER BY id"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [Watch._row_to_watch(row) for row in rows]
 
     async def get_watch(self, watch_id: int) -> Watch | None:
         async with self.conn.execute(

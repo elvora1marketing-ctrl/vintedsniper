@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -48,13 +49,30 @@ def _list(name: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+class Mode(str, Enum):
+    """Wie der Sniper betrieben wird.
+
+    `BOT` gibt Slash-Commands, braucht aber ein Bot-Token. `WEBHOOK` kommt ohne
+    Token aus: Suchen stehen in einer TOML-Datei, Alerts gehen per Webhook raus.
+    """
+
+    BOT = "bot"
+    WEBHOOK = "webhook"
+
+
 @dataclass(frozen=True)
 class Settings:
     # --- Discord ---
+    # Leer = Webhook-Modus. Gesetzt = voller Bot mit Slash-Commands.
     discord_token: str
     # Optional: Slash-Commands sofort in dieser Guild registrieren (statt bis zu
     # 1h globaler Propagation). Für den Eigenbetrieb praktisch immer sinnvoll.
     guild_id: int | None
+    # Ziel für Alerts im Webhook-Modus, und Fallback, wenn eine Suche in der
+    # TOML-Datei kein eigenes Ziel nennt.
+    alert_webhook_url: str
+    # Suchdefinitionen für den Webhook-Modus.
+    searches_path: Path
 
     # --- Speicher ---
     db_path: Path
@@ -79,13 +97,20 @@ class Settings:
 
     log_level: str = "INFO"
 
+    @property
+    def mode(self) -> Mode:
+        return Mode.BOT if self.discord_token else Mode.WEBHOOK
+
     @classmethod
     def load(cls) -> "Settings":
         token = os.getenv("DISCORD_TOKEN", "").strip()
-        if not token:
+        webhook = os.getenv("ALERT_WEBHOOK_URL", "").strip()
+        if not token and not webhook:
             raise SystemExit(
-                "DISCORD_TOKEN fehlt. Lege eine .env an (siehe .env.example) "
-                "und trage das Bot-Token ein."
+                "Es fehlt ein Ziel für die Alerts. Trage in der .env entweder "
+                "ALERT_WEBHOOK_URL ein (schnellster Weg, kein Bot nötig) oder "
+                "DISCORD_TOKEN für den vollen Bot mit Slash-Commands. "
+                "Vorlage: .env.example"
             )
 
         guild_raw = os.getenv("DISCORD_GUILD_ID", "").strip()
@@ -97,6 +122,8 @@ class Settings:
         return cls(
             discord_token=token,
             guild_id=guild_id,
+            alert_webhook_url=webhook,
+            searches_path=Path(os.getenv("SEARCHES_PATH", "searches.toml")),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),
             default_interval=default_interval,
             min_interval=min_interval,

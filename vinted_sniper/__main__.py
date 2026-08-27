@@ -1,4 +1,9 @@
-"""Einstiegspunkt: `python -m vinted_sniper`."""
+"""Einstiegspunkt: `python -m vinted_sniper`.
+
+Der Modus ergibt sich aus der Konfiguration: mit `DISCORD_TOKEN` startet der
+volle Bot samt Slash-Commands, ohne Token läuft der Webhook-Modus mit Suchen
+aus `searches.toml`. Beides teilt sich denselben Kern.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +13,7 @@ import sys
 
 import discord
 
-from .bot import SniperBot
-from .config import Settings
+from .config import Mode, Settings
 
 
 def setup_logging(level: str) -> None:
@@ -23,11 +27,10 @@ def setup_logging(level: str) -> None:
     logging.getLogger("discord.http").setLevel(logging.WARNING)
 
 
-async def run() -> int:
-    settings = Settings.load()
-    setup_logging(settings.log_level)
-    log = logging.getLogger("vinted_sniper")
+async def run_bot(settings: Settings) -> int:
+    from .bot import SniperBot
 
+    log = logging.getLogger("vinted_sniper")
     bot = SniperBot(settings)
     try:
         await bot.start(settings.discord_token)
@@ -35,14 +38,30 @@ async def run() -> int:
         log.error("Discord lehnt das Token ab. Stimmt DISCORD_TOKEN in der .env?")
         return 1
     except discord.PrivilegedIntentsRequired:
-        log.error(
-            "Discord verlangt Intents, die im Developer Portal nicht aktiviert sind."
-        )
+        log.error("Discord verlangt Intents, die im Developer Portal fehlen.")
         return 1
     finally:
         if not bot.is_closed():
             await bot.close()
     return 0
+
+
+async def run() -> int:
+    settings = Settings.load()
+    setup_logging(settings.log_level)
+    log = logging.getLogger("vinted_sniper")
+
+    if settings.mode is Mode.BOT:
+        log.info("Starte im Bot-Modus (Slash-Commands aktiv).")
+        return await run_bot(settings)
+
+    from .runner import run_webhook_mode
+
+    log.info(
+        "Starte im Webhook-Modus — kein Bot-Token gesetzt, Suchen kommen aus %s.",
+        settings.searches_path,
+    )
+    return await run_webhook_mode(settings)
 
 
 def main() -> int:

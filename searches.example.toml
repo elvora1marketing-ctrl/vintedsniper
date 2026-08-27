@@ -1,0 +1,32 @@
+# Suchen für den Webhook-Modus (ohne Bot-Token).
+#
+# Kopieren nach `searches.toml`, anpassen, Container neu starten.
+# Pro Suche ein [[search]]-Block — die doppelten Klammern sind Pflicht.
+#
+# So kommst du an die URL:
+#   1. Auf vinted.de (oder .fr, .pl, .co.uk …) die Suche zusammenklicken:
+#      Suchbegriff, Marke, Größe, Zustand, Preis.
+#   2. Wenn die Ergebnisliste passt: komplette Adresszeile kopieren.
+#   3. Hier als `url` einfügen.
+#
+# Alle Filter aus der URL werden übernommen. Die Sortierung erzwingt der Bot
+# selbst auf „neueste zuerst".
+
+[[search]]
+# Eindeutiger Name. Über ihn merkt sich der Bot, welche Artikel er schon
+# gemeldet hat — ändere ihn nicht ohne Grund, sonst fängt die Suche von vorn an.
+name = "Nike Air Max"
+url = "https://www.vinted.de/catalog?search_text=nike+air+max&price_to=60"
+# Optional. Ohne Angabe gilt DEFAULT_INTERVAL aus der .env.
+interval = 60
+
+[[search]]
+name = "Carhartt Jacken FR"
+url = "https://www.vinted.fr/catalog?search_text=carhartt&price_to=80"
+
+[[search]]
+name = "Stone Island"
+url = "https://www.vinted.de/catalog?search_text=stone+island&price_from=50&price_to=200"
+# Optional: eigener Ziel-Channel für genau diese Suche. Ohne Angabe geht der
+# Alert an ALERT_WEBHOOK_URL aus der .env.
+# webhook = "https://discord.com/api/webhooks/…"

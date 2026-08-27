@@ -8,6 +8,10 @@ services:
     volumes:
       # Watches und die Liste bereits gemeldeter Artikel überleben so jeden Neustart.
       - ./data:/app/data
+      # Suchen für den Webhook-Modus. Die Datei muss existieren, bevor du
+      # startest — sonst legt Docker an der Stelle ein Verzeichnis an:
+      #   cp searches.example.toml searches.toml
+      - ./searches.toml:/app/searches.toml:ro
     # Chromium braucht beim Fallback kurzzeitig spürbar Speicher.
     shm_size: 512mb
     logging:

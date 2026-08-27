@@ -12,7 +12,7 @@ from ..db import Watch, serialize_query
 from ..vinted import domains
 from ..vinted.session import VintedError
 from ..vinted.urls import InvalidSearchURL, SearchQuery, parse_search_url
-from . import embeds
+from .. import embeds
 
 if TYPE_CHECKING:
     from .bot import SniperBot

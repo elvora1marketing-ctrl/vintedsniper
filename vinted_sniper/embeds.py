@@ -6,9 +6,9 @@ import datetime as dt
 
 import discord
 
-from ..db import Watch
-from ..vinted import domains
-from ..vinted.models import Item
+from .db import Watch
+from .vinted import domains
+from .vinted.models import Item
 
 VINTED_TEAL = 0x09B1BA
 WARN_ORANGE = 0xE67E22
@@ -26,7 +26,13 @@ def _age_label(item: Item) -> str:
     return f"vor {age // 3600} Std online"
 
 
-def item_embed(item: Item, watch: Watch) -> discord.Embed:
+def item_embed(item: Item, watch: Watch, *, include_links: bool = False) -> discord.Embed:
+    """Ein Listing als Embed.
+
+    `include_links` hängt die Links als Feld an. Das braucht der Webhook-Weg:
+    ein per URL angelegter Webhook gehört keiner Anwendung und darf deshalb
+    keine Buttons mitschicken — ohne das Feld käme der Alert ohne Kauflink an.
+    """
     domain = domains.lookup(item.host)
 
     embed = discord.Embed(
@@ -46,6 +52,13 @@ def item_embed(item: Item, watch: Watch) -> discord.Embed:
         seller = f"[{item.seller}]({item.seller_url})" if item.seller_url else item.seller
         embed.add_field(name="Verkäufer", value=seller, inline=True)
     embed.add_field(name="Online", value=_age_label(item), inline=True)
+
+    if include_links:
+        embed.add_field(
+            name="Links",
+            value=f"[Artikel öffnen]({item.url}) · [Sofort kaufen]({item.buy_url})",
+            inline=False,
+        )
 
     if item.photo_url:
         embed.set_image(url=item.photo_url)

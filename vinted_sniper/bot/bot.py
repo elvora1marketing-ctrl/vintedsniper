@@ -9,12 +9,14 @@ import logging
 import discord
 from discord.ext import commands
 
+from .. import embeds
 from ..config import Settings
 from ..db import Database, Watch
 from ..monitor import Monitor
+from ..notifiers import WebhookNotifier
+from ..searches import InvalidSearchFile, load_searches, sync_to_db
 from ..vinted.client import VintedClient
 from ..vinted.models import Item
-from . import embeds
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +37,9 @@ class SniperBot(commands.Bot):
         self.settings = settings
         self.db = Database(settings.db_path)
         self.client = VintedClient(settings)
+        # Auch im Bot-Modus kann eine Suche ein Webhook-Ziel haben — etwa eine
+        # aus `searches.toml` oder ein Channel, in dem der Bot nicht ist.
+        self.webhooks = WebhookNotifier()
         self.monitor = Monitor(
             settings,
             self.db,
@@ -45,6 +50,9 @@ class SniperBot(commands.Bot):
         )
         self.started_at = dt.datetime.now(dt.timezone.utc)
         self._send_lock = asyncio.Lock()
+        # `on_ready` feuert auch nach jedem Reconnect — der Startlauf darf aber
+        # nur einmal passieren.
+        self._bootstrapped = False
 
     # ------------------------------------------------------------- Lebenszyklus
 
@@ -65,18 +73,47 @@ class SniperBot(commands.Bot):
             await self.tree.sync()
             log.info("Slash-Commands global registriert (Propagation dauert bis zu 1h).")
 
+    async def _sync_file_searches(self) -> None:
+        """`searches.toml` mitlaufen lassen, falls vorhanden.
+
+        So funktionieren beide Wege nebeneinander: was in der Datei steht, läuft
+        über den Webhook; was per `/watch add` angelegt wurde, über den Bot.
+        """
+        if not self.settings.searches_path.exists():
+            return
+        try:
+            file_searches = load_searches(
+                self.settings.searches_path,
+                default_interval=self.settings.default_interval,
+                min_interval=self.settings.min_interval,
+                default_webhook=self.settings.alert_webhook_url,
+            )
+        except InvalidSearchFile as exc:
+            log.error("%s wird ignoriert: %s", self.settings.searches_path, exc)
+            return
+        watches = await sync_to_db(self.db, file_searches)
+        log.info(
+            "%d Suche(n) aus %s übernommen.", len(watches), self.settings.searches_path
+        )
+
     async def on_ready(self) -> None:
         log.info("Eingeloggt als %s (ID %s)", self.user, getattr(self.user, "id", "?"))
-        started = await self.monitor.start_all()
-        log.info("%d gespeicherte Suchen wieder gestartet.", started)
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching, name="Vinted-Neuheiten"
             )
         )
+        if self._bootstrapped:
+            return
+        self._bootstrapped = True
+
+        await self._sync_file_searches()
+        started = await self.monitor.start_all()
+        log.info("%d gespeicherte Suchen gestartet.", started)
 
     async def close(self) -> None:
         await self.monitor.shutdown()
+        await self.webhooks.close()
         await self.db.close()
         await super().close()
 
@@ -93,6 +130,12 @@ class SniperBot(commands.Bot):
         return channel if isinstance(channel, discord.abc.Messageable) else None
 
     async def _deliver_items(self, watch: Watch, items: list[Item]) -> None:
+        # Suchen mit eigenem Webhook-Ziel (z. B. aus `searches.toml`) gehen nicht
+        # über den Bot — der ist in dem Channel womöglich gar nicht.
+        if watch.webhook_url:
+            await self.webhooks.send_items(watch, items)
+            return
+
         channel = await self._resolve_channel(watch.channel_id)
         if channel is None:
             return
@@ -118,6 +161,9 @@ class SniperBot(commands.Bot):
                 )
 
     async def _deliver_trouble(self, watch: Watch, message: str) -> None:
+        if watch.webhook_url:
+            await self.webhooks.send_trouble(watch, message)
+            return
         channel = await self._resolve_channel(watch.channel_id)
         if channel is None:
             return
@@ -132,6 +178,9 @@ class SniperBot(commands.Bot):
         await channel.send(embed=embed)
 
     async def _deliver_recovered(self, watch: Watch, message: str) -> None:
+        if watch.webhook_url:
+            await self.webhooks.send_recovered(watch, message)
+            return
         channel = await self._resolve_channel(watch.channel_id)
         if channel is None:
             return
