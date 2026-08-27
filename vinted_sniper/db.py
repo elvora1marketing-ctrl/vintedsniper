@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,10 @@ from pathlib import Path
 import aiosqlite
 
 from .vinted.urls import SearchQuery
+
+
+class DatabaseUnavailable(RuntimeError):
+    """Die Datenbankdatei lässt sich nicht anlegen oder öffnen."""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS watches (
@@ -108,8 +113,20 @@ class Database:
         self._conn: aiosqlite.Connection | None = None
 
     async def connect(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = await aiosqlite.connect(self.path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = await aiosqlite.connect(self.path)
+        except (OSError, sqlite3.Error) as exc:
+            # Der mit Abstand häufigste Fall: das Datenverzeichnis gehört root,
+            # der Container läuft aber als `sniper`. Ein roher SQLite-Stacktrace
+            # hilft dabei niemandem weiter.
+            raise DatabaseUnavailable(
+                f"Datenbank {self.path} lässt sich nicht öffnen: {exc}\n"
+                "Meist fehlen die Schreibrechte auf dem Datenverzeichnis. "
+                "Behebung:\n"
+                "  docker compose down && docker volume rm vintedsniper_sniper-data "
+                "; docker compose up -d"
+            ) from exc
         self._conn.row_factory = aiosqlite.Row
         # WAL überlebt harte Neustarts deutlich besser als der Default.
         await self._conn.execute("PRAGMA journal_mode=WAL")

@@ -14,6 +14,7 @@ import sys
 import discord
 
 from .config import Mode, Settings
+from .db import DatabaseUnavailable
 
 
 def setup_logging(level: str) -> None:
@@ -39,6 +40,9 @@ async def run_bot(settings: Settings) -> int:
         return 1
     except discord.PrivilegedIntentsRequired:
         log.error("Discord verlangt Intents, die im Developer Portal fehlen.")
+        return 1
+    except DatabaseUnavailable as exc:
+        log.error("%s", exc)
         return 1
     finally:
         if not bot.is_closed():

@@ -18,7 +18,7 @@ from aiosqlite_stub import install  # noqa: E402
 
 install()  # muss vor dem Import von vinted_sniper.db passieren
 
-from vinted_sniper.db import Database  # noqa: E402
+from vinted_sniper.db import Database, DatabaseUnavailable  # noqa: E402
 from vinted_sniper.searches import FileSearch, sync_to_db  # noqa: E402
 from vinted_sniper.vinted.urls import parse_search_url  # noqa: E402
 
@@ -305,6 +305,19 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(watches[0].origin, "command")
             finally:
                 await db.close()
+
+    async def test_unbeschreibbarer_pfad_meldet_sich_verstaendlich(self):
+        # Der Fall aus der Praxis: das Datenverzeichnis lässt sich nicht anlegen
+        # bzw. beschreiben. Statt eines rohen SQLite-Stacktrace muss eine
+        # Meldung kommen, die sagt, was zu tun ist.
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "data"
+            blocker.write_text("ich bin eine Datei, kein Verzeichnis")
+            db = Database(blocker / "sniper.db")
+            with self.assertRaises(DatabaseUnavailable) as ctx:
+                await db.connect()
+        self.assertIn("lässt sich nicht öffnen", str(ctx.exception))
+        self.assertIn("docker compose", str(ctx.exception))
 
     async def test_connect_ist_wiederholbar(self):
         with tempfile.TemporaryDirectory() as tmp:

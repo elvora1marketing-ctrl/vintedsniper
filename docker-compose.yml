@@ -6,8 +6,12 @@ services:
     restart: unless-stopped
     env_file: .env
     volumes:
-      # Watches und die Liste bereits gemeldeter Artikel überleben so jeden Neustart.
-      - ./data:/app/data
+      # Benanntes Volume statt Bind-Mount auf ./data: Docker übernimmt dabei
+      # Besitzer und Rechte aus dem Image, das Verzeichnis gehört also dem
+      # Benutzer `sniper`. Ein Bind-Mount auf einen noch nicht existierenden
+      # Ordner würde Docker als root anlegen — der Container könnte die
+      # Datenbank dann nicht schreiben.
+      - sniper-data:/app/data
       # Suchen für den Webhook-Modus. Die Datei muss existieren, bevor du
       # startest — sonst legt Docker an der Stelle ein Verzeichnis an:
       #   cp searches.example.toml searches.toml
@@ -19,3 +23,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  sniper-data:

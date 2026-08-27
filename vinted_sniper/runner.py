@@ -11,7 +11,7 @@ import asyncio
 import logging
 
 from .config import Settings
-from .db import Database
+from .db import Database, DatabaseUnavailable
 from .monitor import Monitor
 from .notifiers import WebhookNotifier
 from .searches import InvalidSearchFile, load_searches, sync_to_db
@@ -33,7 +33,11 @@ async def run_webhook_mode(settings: Settings) -> int:
         return 1
 
     db = Database(settings.db_path)
-    await db.connect()
+    try:
+        await db.connect()
+    except DatabaseUnavailable as exc:
+        log.error("%s", exc)
+        return 1
 
     client = VintedClient(settings)
     notifier = WebhookNotifier()
