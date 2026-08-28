@@ -164,34 +164,53 @@ class VintedSession:
         proxy = self.settings.proxies[self._proxy_index % len(self.settings.proxies)]
         return {"http": proxy, "https": proxy}
 
-    def _mark_proxy_dead(self) -> None:
+    def _mark_proxy_dead(self) -> bool:
         """Den aktuellen Proxy aus dem Rennen nehmen.
 
-        Bei großen Anbieterlisten sind einzelne Einträge regelmäßig unbrauchbar
-        (Bandbreite aufgebraucht, Session abgelaufen). Solche Proxys immer
-        wieder anzufassen kostet bei jedem Durchlauf Zeit.
+        Gibt `True` zurück, wenn damit die ganze Liste durchprobiert ist. Dann
+        liegt es nicht mehr am einzelnen Eintrag, sondern am Konto oder am Netz
+        — und weiterzuprobieren wäre reine Beschäftigung.
         """
         if not self.settings.proxies:
-            return
+            return True
         index = self._proxy_index % len(self.settings.proxies)
-        if index not in self._dead_proxies:
-            self._dead_proxies.add(index)
-            log.warning(
-                "[%s] Proxy #%d ist unbrauchbar und wird übersprungen "
-                "(%d von %d noch nutzbar).",
-                self.host,
-                index + 1,
-                len(self.settings.proxies) - len(self._dead_proxies),
-                len(self.settings.proxies),
-            )
+        self._dead_proxies.add(index)
+        # Bei dreißig Einträgen ergäbe eine Warnung je Proxy nur Logmüll; die
+        # Zusammenfassung am Ende sagt dasselbe in einer Zeile.
+        log.debug(
+            "[%s] Proxy #%d unbrauchbar (%d von %d übrig).",
+            self.host,
+            index + 1,
+            len(self.settings.proxies) - len(self._dead_proxies),
+            len(self.settings.proxies),
+        )
         if len(self._dead_proxies) >= len(self.settings.proxies):
-            # Alle als tot markiert: eher ein allgemeines Netzproblem als
-            # tatsächlich lauter kaputte Proxys — noch einmal von vorn.
-            log.warning(
-                "[%s] Alle Proxys waren erfolglos — Liste wird zurückgesetzt.",
-                self.host,
-            )
             self._dead_proxies.clear()
+            return True
+        return False
+
+    def _exhausted_error(self, cause: Exception) -> Blocked:
+        """Meldung, wenn kein einziger Proxy mehr durchkommt.
+
+        Der häufigste Grund ist ein aufgebrauchtes Kontingent beim Anbieter.
+        Der rohe curl-Fehler nennt dafür nur „response 402", was ohne
+        Vorwissen niemandem weiterhilft.
+        """
+        total = len(self.settings.proxies)
+        detail = str(cause)
+        if "402" in detail:
+            grund = (
+                "Alle Proxys antworten mit HTTP 402 (Payment Required). Das "
+                "heißt beim Anbieter: Datenvolumen aufgebraucht oder Abo "
+                "abgelaufen. Prüf dein Guthaben im Anbieter-Dashboard — am "
+                "Sniper liegt es nicht."
+            )
+        else:
+            grund = f"Kein Proxy kommt durch. Letzter Fehler: {detail}"
+        return Blocked(
+            f"{grund} ({total} Einträge durchprobiert, nächster Versuch in "
+            f"{int(self.IP_BLOCK_COOLDOWN / 60)} Min.)"
+        )
 
     def _rotate_proxy(self) -> None:
         """Auf den nächsten nutzbaren Proxy weiterschalten.
@@ -208,7 +227,7 @@ class VintedSession:
             if self._proxy_index % total not in self._dead_proxies:
                 break
 
-        log.info(
+        log.debug(
             "[%s] Wechsle auf Proxy #%d von %d.",
             self.host,
             self._proxy_index % total + 1,
@@ -425,8 +444,18 @@ class VintedSession:
                     # Proxy ist kaputt (Limit erreicht, abgelaufen, tot). Ohne
                     # Weiterschalten bliebe die Suche für immer daran hängen.
                     last_error = exc
-                    log.warning("[%s] %s", self.host, exc)
-                    self._mark_proxy_dead()
+                    if not self.settings.proxies:
+                        log.warning("[%s] %s", self.host, exc)
+                        await self._backoff(attempt)
+                        continue
+
+                    if self._mark_proxy_dead():
+                        # Die ganze Liste ist durch. Weiterprobieren würde nur
+                        # das Log fluten und den Server beschäftigen, deshalb
+                        # erst einmal Ruhe.
+                        self._blocked_until = time.monotonic() + self.IP_BLOCK_COOLDOWN
+                        raise self._exhausted_error(exc) from exc
+
                     self._rotate_proxy()
                     continue
 
