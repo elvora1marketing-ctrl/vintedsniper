@@ -51,14 +51,21 @@ def load_searches(
     default_interval: int,
     min_interval: int,
     default_webhook: str,
+    allow_empty: bool = False,
 ) -> list[FileSearch]:
     """`searches.toml` einlesen und validieren.
 
     Wirft `InvalidSearchFile` mit einer konkreten Fehlerbeschreibung — im
     Webhook-Modus ist die Datei die einzige Eingabemöglichkeit, entsprechend
     genau muss die Fehlermeldung sein.
+
+    `allow_empty` gilt für den Bot-Modus: dort werden Suchen per Slash-Command
+    verwaltet, eine leere oder fehlende Datei ist also kein Fehler, sondern der
+    Normalfall.
     """
     if not path.exists():
+        if allow_empty:
+            return []
         raise InvalidSearchFile(
             f"{path} gibt es nicht. Lege die Datei an (Vorlage: "
             f"searches.example.toml).\n\n{EXAMPLE}"
@@ -81,6 +88,8 @@ def load_searches(
 
     raw_entries = data.get("search")
     if raw_entries is None:
+        if allow_empty:
+            return []
         raise InvalidSearchFile(
             f"In {path} steht kein [[search]]-Block.\n\n{EXAMPLE}"
         )
@@ -150,7 +159,7 @@ def load_searches(
             )
         )
 
-    if not searches:
+    if not searches and not allow_empty:
         raise InvalidSearchFile(f"In {path} steht keine einzige Suche.\n\n{EXAMPLE}")
 
     return searches

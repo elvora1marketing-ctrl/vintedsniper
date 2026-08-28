@@ -228,6 +228,67 @@ class WatchCommands(commands.Cog):
             f"⏱️ Suche #{watch_id} prüft jetzt alle {seconds}s."
         )
 
+    # ------------------------------------------------------------------ import
+
+    @group.command(
+        name="import",
+        description="Suchen aus searches.toml übernehmen und hier verwaltbar machen",
+    )
+    @app_commands.describe(channel="Channel für die Alerts (Standard: hier)")
+    async def import_file_searches(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None,
+    ) -> None:
+        target = channel or interaction.channel
+        if not isinstance(target, discord.TextChannel):
+            await interaction.response.send_message(
+                "Bitte einen normalen Text-Channel angeben.", ephemeral=True
+            )
+            return
+
+        file_watches = await self.bot.db.list_file_watches()
+        if not file_watches:
+            await interaction.response.send_message(
+                "Es gibt keine Suchen aus `searches.toml` zu übernehmen — hier "
+                "läuft schon alles über Slash-Commands.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        for watch in file_watches:
+            await self.bot.db.adopt_file_watch(
+                watch.id,
+                guild_id=interaction.guild_id or 0,
+                channel_id=target.id,
+                creator_id=interaction.user.id,
+            )
+            refreshed = await self.bot.db.get_watch(watch.id)
+            if refreshed is not None and refreshed.enabled:
+                # Neu starten, damit die Zustellung sofort über den Bot läuft.
+                self.bot.monitor.start(refreshed)
+
+        names = "\n".join(f"• #{w.id} · {w.name}" for w in file_watches[:20])
+        if len(file_watches) > 20:
+            names += f"\n• … und {len(file_watches) - 20} weitere"
+
+        embed = discord.Embed(
+            title=f"{len(file_watches)} Suche(n) übernommen",
+            description=(
+                f"{names}\n\nSie melden ab sofort in {target.mention} und lassen "
+                "sich mit `/watch` verwalten. Trefferhistorie und Intervalle "
+                "bleiben erhalten."
+            ),
+            color=embeds.OK_GREEN,
+        )
+        embed.set_footer(
+            text="Leere jetzt searches.toml, sonst werden sie beim nächsten "
+            "Neustart erneut als Datei-Suchen angelegt."
+        )
+        await interaction.followup.send(embed=embed)
+
     # -------------------------------------------------------------------- test
 
     @group.command(

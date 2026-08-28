@@ -134,6 +134,7 @@ Läuft. In Discord jetzt `/watch add` tippen.
 | `/watch pause id:` / `/watch resume id:` | Suche anhalten bzw. fortsetzen. |
 | `/watch interval id: seconds:` | Prüfintervall ändern. |
 | `/watch remove id:` | Suche löschen. |
+| `/watch import [channel]` | Suchen aus `searches.toml` übernehmen — sie melden danach über den Bot und lassen sich per Command verwalten. Trefferhistorie bleibt erhalten. |
 | `/status` | Zustand von Bot und Vinted-Sessions. |
 
 Bei allen `id`-Optionen schlägt Discord die vorhandenen Suchen per Autocomplete

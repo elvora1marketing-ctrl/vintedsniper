@@ -89,6 +89,51 @@ class WatchCrudTests(DatabaseTestCase):
         self.assertEqual(len(await self.db.list_watches(20)), 1)
         self.assertEqual(len(await self.db.list_watches()), 3)
 
+    async def test_datei_suchen_erscheinen_in_jeder_guild(self):
+        # Sie gehören zur Instanz, nicht zu einem Server — sonst wären sie in
+        # /watch list unsichtbar und niemand käme auf /watch import.
+        await sync_to_db(
+            self.db, [file_search("Datei", "https://www.vinted.de/catalog?search_text=a")]
+        )
+        query = parse_search_url("https://www.vinted.de/catalog?search_text=b")
+        await self.db.add_watch(
+            guild_id=99,
+            channel_id=1,
+            creator_id=1,
+            name="Command",
+            query=query,
+            source_url=query.web_url(),
+            interval=60,
+        )
+        namen = [w.name for w in await self.db.list_watches(99)]
+        self.assertEqual(sorted(namen), ["Command", "Datei"])
+        # Ein fremder Server sieht die Datei-Suche, aber nicht die fremde.
+        self.assertEqual([w.name for w in await self.db.list_watches(1234)], ["Datei"])
+
+    async def test_uebernahme_einer_datei_suche(self):
+        watches = await sync_to_db(
+            self.db, [file_search("Nike", "https://www.vinted.de/catalog?search_text=nike")]
+        )
+        watch_id = watches[0].id
+        await self.db.filter_new(watch_id, ["artikel-1"])
+
+        await self.db.adopt_file_watch(
+            watch_id, guild_id=42, channel_id=4711, creator_id=7
+        )
+        adopted = await self.db.get_watch(watch_id)
+        assert adopted is not None
+        self.assertEqual(adopted.origin, "command")
+        self.assertEqual(adopted.channel_id, 4711)
+        self.assertEqual(adopted.guild_id, 42)
+        # Kein Webhook mehr: die Zustellung läuft ab jetzt über den Bot.
+        self.assertEqual(adopted.webhook_url, "")
+        # Historie bleibt — sonst gäbe es sofort einen Schwall alter Treffer.
+        self.assertEqual(await self.db.filter_new(watch_id, ["artikel-1"]), set())
+        # Und der Datei-Abgleich fasst sie nicht mehr an.
+        self.assertEqual(await self.db.list_file_watches(), [])
+        await sync_to_db(self.db, [])
+        self.assertIsNotNone(await self.db.get_watch(watch_id))
+
     async def test_pausieren_intervall_und_loeschen(self):
         query = parse_search_url("https://www.vinted.de/catalog?search_text=nike")
         watch = await self.db.add_watch(

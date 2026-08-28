@@ -232,6 +232,26 @@ class Database:
         )
         await self.conn.commit()
 
+    async def adopt_file_watch(
+        self, watch_id: int, *, guild_id: int, channel_id: int, creator_id: int
+    ) -> None:
+        """Eine Datei-Suche in eine per Command verwaltete Suche umwandeln.
+
+        Sie behält ID und Trefferhistorie — es gibt also keinen Alert-Schwall —,
+        wird aber ab sofort über den Bot in den gewählten Channel zugestellt und
+        beim nächsten Abgleich nicht mehr aus `searches.toml` überschrieben.
+        """
+        await self.conn.execute(
+            """
+            UPDATE watches
+               SET origin = 'command', webhook_url = '',
+                   guild_id = ?, channel_id = ?, creator_id = ?
+             WHERE id = ? AND origin = 'file'
+            """,
+            (guild_id, channel_id, creator_id, watch_id),
+        )
+        await self.conn.commit()
+
     async def list_file_watches(self) -> list[Watch]:
         async with self.conn.execute(
             "SELECT * FROM watches WHERE origin = 'file' ORDER BY id"
@@ -250,7 +270,13 @@ class Database:
         sql = "SELECT * FROM watches ORDER BY id"
         args: tuple[int, ...] = ()
         if guild_id is not None:
-            sql = "SELECT * FROM watches WHERE guild_id = ? ORDER BY id"
+            # Datei-Suchen gehören zur Instanz, nicht zu einem Server — ohne
+            # sie hier wären sie in `/watch list` unsichtbar und niemand käme
+            # auf die Idee, sie mit `/watch import` zu übernehmen.
+            sql = (
+                "SELECT * FROM watches WHERE guild_id = ? OR origin = 'file' "
+                "ORDER BY id"
+            )
             args = (guild_id,)
         async with self.conn.execute(sql, args) as cursor:
             rows = await cursor.fetchall()

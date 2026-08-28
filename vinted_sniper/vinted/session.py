@@ -132,6 +132,15 @@ class VintedSession:
             self._session is not None or self._browser_mode
         )
 
+    def proxy_line(self) -> str | None:
+        """Wie viele Proxys noch nutzbar sind — `None` ohne Proxy-Betrieb."""
+        total = len(self.settings.proxies)
+        if not total:
+            return None
+        usable = total - len(self._dead_proxies)
+        current = self._proxy_index % total + 1
+        return f"Proxy #{current} aktiv · {usable} von {total} nutzbar"
+
     def status_line(self) -> str:
         remaining = self._blocked_until - time.monotonic()
         if remaining > 0:
@@ -535,7 +544,12 @@ class SessionPool:
             return session
 
     def status(self) -> dict[str, str]:
-        return {host: session.status_line() for host, session in self._sessions.items()}
+        lines: dict[str, str] = {}
+        for host, session in self._sessions.items():
+            line = session.status_line()
+            proxy = session.proxy_line()
+            lines[host] = f"{line} · {proxy}" if proxy else line
+        return lines
 
     async def close(self) -> None:
         for session in list(self._sessions.values()):

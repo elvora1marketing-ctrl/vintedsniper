@@ -96,8 +96,13 @@ def watch_list_embed(watches: list[Watch], running: set[int]) -> discord.Embed:
         else:
             state = "⚪ startet"
 
+        ziel = (
+            "per Webhook (aus `searches.toml`)"
+            if watch.origin == "file"
+            else f"<#{watch.channel_id}>"
+        )
         lines = [
-            f"{state} · alle {watch.interval}s · <#{watch.channel_id}>",
+            f"{state} · alle {watch.interval}s · {ziel}",
             f"{domain.flag} {watch.query.describe()}",
             f"{watch.hits} Treffer bisher",
         ]
@@ -107,6 +112,11 @@ def watch_list_embed(watches: list[Watch], running: set[int]) -> discord.Embed:
 
     if len(watches) > 25:
         embed.set_footer(text=f"… und {len(watches) - 25} weitere.")
+    elif any(w.origin == "file" for w in watches):
+        embed.set_footer(
+            text="Suchen aus searches.toml lassen sich mit /watch import "
+            "hierher holen und dann normal verwalten."
+        )
     return embed
 
 

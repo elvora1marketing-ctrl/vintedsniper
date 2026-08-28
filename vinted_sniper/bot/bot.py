@@ -79,22 +79,26 @@ class SniperBot(commands.Bot):
         So funktionieren beide Wege nebeneinander: was in der Datei steht, läuft
         über den Webhook; was per `/watch add` angelegt wurde, über den Bot.
         """
-        if not self.settings.searches_path.exists():
-            return
         try:
             file_searches = load_searches(
                 self.settings.searches_path,
                 default_interval=self.settings.default_interval,
                 min_interval=self.settings.min_interval,
                 default_webhook=self.settings.alert_webhook_url,
+                # Im Bot-Modus werden Suchen per Slash-Command verwaltet — eine
+                # leere oder fehlende Datei ist hier völlig normal.
+                allow_empty=True,
             )
         except InvalidSearchFile as exc:
             log.error("%s wird ignoriert: %s", self.settings.searches_path, exc)
             return
         watches = await sync_to_db(self.db, file_searches)
-        log.info(
-            "%d Suche(n) aus %s übernommen.", len(watches), self.settings.searches_path
-        )
+        if watches:
+            log.info(
+                "%d Suche(n) aus %s übernommen.",
+                len(watches),
+                self.settings.searches_path,
+            )
 
     async def on_ready(self) -> None:
         log.info("Eingeloggt als %s (ID %s)", self.user, getattr(self.user, "id", "?"))
