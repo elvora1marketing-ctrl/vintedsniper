@@ -69,9 +69,28 @@ class SniperBot(commands.Bot):
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
             log.info("Slash-Commands für Guild %s registriert.", self.settings.guild_id)
-        else:
-            await self.tree.sync()
-            log.info("Slash-Commands global registriert (Propagation dauert bis zu 1h).")
+
+    async def _register_commands(self) -> None:
+        """Slash-Commands registrieren, wenn keine Guild-ID konfiguriert ist.
+
+        Ohne Guild-ID würde eine globale Registrierung bis zu einer Stunde
+        brauchen, bis die Befehle auftauchen. Da hier erst nach dem Verbinden
+        bekannt ist, auf welchen Servern der Bot überhaupt ist, wird das
+        nachgeholt: pro Server registriert, sind die Befehle sofort da — und
+        niemand muss eine Server-ID heraussuchen.
+        """
+        if self.settings.guild_id or not self.guilds:
+            if not self.guilds:
+                log.warning(
+                    "Der Bot ist auf keinem Server. Lade ihn über den "
+                    "OAuth2-Link ein, dann tauchen die Befehle auf."
+                )
+            return
+
+        for guild in self.guilds:
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            log.info("Slash-Commands für „%s“ registriert.", guild.name)
 
     async def _sync_file_searches(self) -> None:
         """`searches.toml` mitlaufen lassen, falls vorhanden.
@@ -111,6 +130,7 @@ class SniperBot(commands.Bot):
             return
         self._bootstrapped = True
 
+        await self._register_commands()
         await self._sync_file_searches()
         started = await self.monitor.start_all()
         log.info("%d gespeicherte Suchen gestartet.", started)

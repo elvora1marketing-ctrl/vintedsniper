@@ -108,10 +108,11 @@ cp searches.example.toml searches.toml   # auch im Bot-Modus nötig (Docker-Moun
 $EDITOR .env          # DISCORD_TOKEN und DISCORD_GUILD_ID eintragen
 ```
 
-`DISCORD_GUILD_ID` ist die ID deines Servers (Discord-Einstellungen →
-Erweitert → Entwicklermodus an, dann Rechtsklick auf den Server → „Server-ID
-kopieren"). Damit sind die Slash-Commands sofort verfügbar; ohne die ID
-registriert Discord sie global, was bis zu einer Stunde dauert.
+`DISCORD_GUILD_ID` kannst du leer lassen — der Bot findet selbst heraus, auf
+welchen Servern er ist, und registriert die Befehle dort. Setze die ID nur,
+wenn er auf mehreren Servern läuft und die Befehle bloß auf einem erscheinen
+sollen (Discord-Einstellungen → Erweitert → Entwicklermodus an, dann
+Rechtsklick auf den Server → „Server-ID kopieren").
 
 ### 3. Starten
 
@@ -276,7 +277,7 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | --- | --- | --- |
 | `ALERT_WEBHOOK_URL` | — | Webhook-URL für Alerts. Ohne `DISCORD_TOKEN` ist das der Betriebsmodus. |
 | `DISCORD_TOKEN` | — | Bot-Token. Gesetzt = Slash-Commands. |
-| `DISCORD_GUILD_ID` | — | Server-ID für sofortige Command-Registrierung. |
+| `DISCORD_GUILD_ID` | — | Optional. Leer = Befehle werden auf allen Servern des Bots registriert. |
 | `SEARCHES_PATH` | `searches.toml` | Suchdefinitionen für den Webhook-Modus. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
 | `MIN_INTERVAL` | `20` | Untergrenze, die `/watch interval` nicht unterschreitet. |
