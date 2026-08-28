@@ -85,9 +85,19 @@ class RateLimiter:
 class VintedSession:
     """Eine wiederverwendbare, selbstheilende Session für genau einen Host."""
 
-    MAX_ATTEMPTS = 4
+    BASE_ATTEMPTS = 4
     # Ruhezeit, nachdem eine IP-Sperre festgestellt wurde.
     IP_BLOCK_COOLDOWN = 600.0
+
+    @property
+    def max_attempts(self) -> int:
+        """Genug Versuche, um jeden Proxy einmal durchzuprobieren.
+
+        Mit vier festen Versuchen käme bei fünf hinterlegten Proxies nie die
+        ganze Liste dran — der Bot würde aufgeben, obwohl ein funktionierender
+        Ausgang noch ungenutzt in der Liste steht.
+        """
+        return max(self.BASE_ATTEMPTS, len(self.settings.proxies) + 1)
 
     def __init__(self, host: str, settings: Settings) -> None:
         self.host = host
@@ -143,12 +153,18 @@ class VintedSession:
         return {"http": proxy, "https": proxy}
 
     def _rotate_proxy(self) -> None:
+        """Auf den nächsten Proxy weiterschalten.
+
+        Bei genau einem oder gar keinem Proxy gibt es nichts zu wechseln — dann
+        bleibt es beim Backoff.
+        """
         if len(self.settings.proxies) > 1:
             self._proxy_index += 1
             log.info(
-                "[%s] Wechsle auf Proxy #%d",
+                "[%s] Wechsle auf Proxy #%d von %d.",
                 self.host,
-                self._proxy_index % len(self.settings.proxies),
+                self._proxy_index % len(self.settings.proxies) + 1,
+                len(self.settings.proxies),
             )
 
     def _base_headers(self) -> dict[str, str]:
@@ -331,7 +347,7 @@ class VintedSession:
 
             last_error: Exception | None = None
 
-            for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            for attempt in range(1, self.max_attempts + 1):
                 if self._browser_mode:
                     try:
                         return await self._get_json_via_browser(path, params)

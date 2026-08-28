@@ -102,10 +102,16 @@ class Settings:
         return Mode.BOT if self.discord_token else Mode.WEBHOOK
 
     @classmethod
-    def load(cls) -> "Settings":
+    def load(cls, *, require_target: bool = True) -> "Settings":
+        """Einstellungen einlesen.
+
+        `require_target=False` überspringt die Prüfung auf ein Alert-Ziel —
+        die Diagnose (`python -m vinted_sniper.check`) prüft nur die
+        Netzwerkverbindung und braucht weder Bot noch Webhook.
+        """
         token = os.getenv("DISCORD_TOKEN", "").strip()
         webhook = os.getenv("ALERT_WEBHOOK_URL", "").strip()
-        if not token and not webhook:
+        if require_target and not token and not webhook:
             raise SystemExit(
                 "Es fehlt ein Ziel für die Alerts. Trage in der .env entweder "
                 "ALERT_WEBHOOK_URL ein (schnellster Weg, kein Bot nötig) oder "

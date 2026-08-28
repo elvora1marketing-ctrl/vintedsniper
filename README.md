@@ -217,6 +217,39 @@ Es gibt keinen Zustand, in dem der Sniper dauerhaft stillsteht: jede Blockade
 löst einen Reparaturpfad aus. Hängt eine Suche fünfmal am Stück, meldet sich der
 Bot einmal im Channel und wieder, sobald es läuft.
 
+### Erreichbarkeit prüfen
+
+Bevor du im Log rätst, frag den Sniper direkt:
+
+```bash
+docker compose run --rm sniper python -m vinted_sniper.check
+```
+
+Das prüft die direkte Verbindung und jeden Eintrag aus `PROXIES` einzeln — je
+mit ausgehender IP, HTTP-Status und einer Gegenprobe im echten Browser — und
+sagt am Ende, welcher Weg funktioniert. Eine andere Länderdomain prüfst du mit
+`… vinted_sniper.check vinted.fr`.
+
+### Proxys: worauf es ankommt
+
+Auf einem Server ist die eigene IP fast immer gesperrt; Vinted blockt
+Rechenzentren pauschal. Dann führt kein Weg an einem Proxy vorbei — aber am
+richtigen:
+
+* **Residential oder ISP/Static-Residential.** Datacenter-Proxys stehen in
+  denselben Sperrlisten wie der Server selbst und ändern gar nichts.
+* **Feste IPs statt rotierender.** Vinted bindet Session-Cookies an die IP.
+  Wechselt sie mitten in der Sitzung, ist genau das das Bot-Muster, nach dem
+  Datadome sucht. Zwei bis drei feste IPs sind besser als ein rotierender Pool
+  — der Sniper schaltet bei einer Blockade selbst auf die nächste weiter.
+* **Passendes Land.** Für `vinted.de` eine deutsche IP: der Browser meldet
+  deutsche Sprache und Zeitzone, eine IP aus Übersee widerspricht dem.
+* **Monatspreis statt Gigabyte-Abrechnung.** Im Browser-Modus kommen schnell
+  über zehn Gigabyte im Monat zusammen.
+
+Traffic senkst du wirksam über das Intervall: 180 statt 60 Sekunden drittelt
+ihn, und die wenigsten Schnäppchen sind nach drei Minuten weg.
+
 ### Wenn es trotzdem klemmt
 
 1. **Intervall hoch.** 60s statt 20s. Aggressives Polling ist der häufigste
