@@ -4,6 +4,7 @@
 data/
 tests/
 searches.toml
+proxies.txt
 searches.example.toml
 README.md
 *.db

@@ -16,6 +16,9 @@ services:
       # startest — sonst legt Docker an der Stelle ein Verzeichnis an:
       #   cp searches.example.toml searches.toml
       - ./searches.toml:/app/searches.toml:ro
+      # Proxy-Liste. Muss ebenfalls existieren, bevor du startest:
+      #   touch proxies.txt
+      - ./proxies.txt:/app/proxies.txt:ro
     # Chromium braucht beim Fallback kurzzeitig spürbar Speicher.
     shm_size: 512mb
     logging:

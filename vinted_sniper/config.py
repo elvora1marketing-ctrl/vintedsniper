@@ -10,6 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .proxies import load_proxies
+
 load_dotenv()
 
 log = logging.getLogger(__name__)
@@ -42,11 +44,6 @@ def _bool(name: str, default: bool) -> bool:
     if raw is None or raw.strip() == "":
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _list(name: str) -> list[str]:
-    raw = os.getenv(name, "")
-    return [part.strip() for part in raw.split(",") if part.strip()]
 
 
 class Mode(str, Enum):
@@ -137,7 +134,10 @@ class Settings:
             jitter=max(0.0, _float("JITTER", 0.25)),
             max_item_age=_int("MAX_ITEM_AGE", 900),
             impersonate=os.getenv("IMPERSONATE", "chrome124").strip() or "chrome124",
-            proxies=_list("PROXIES"),
+            proxies=load_proxies(
+                inline=os.getenv("PROXIES", ""),
+                path=Path(os.getenv("PROXIES_FILE", "proxies.txt")),
+            ),
             playwright_fallback=_bool("PLAYWRIGHT_FALLBACK", True),
             request_timeout=_float("REQUEST_TIMEOUT", 20.0),
             rate_limit_per_domain=max(1, _int("RATE_LIMIT_PER_DOMAIN", 60)),

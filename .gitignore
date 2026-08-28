@@ -1,5 +1,6 @@
 .env
 searches.toml
+proxies.txt
 data/
 *.db
 *.db-wal

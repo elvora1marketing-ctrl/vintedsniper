@@ -283,7 +283,8 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `JITTER` | `0.25` | Zufallsanteil auf jedes Intervall (±25 %). |
 | `MAX_ITEM_AGE` | `900` | Artikel, die älter sind, werden nicht gemeldet. `0` = aus. |
 | `IMPERSONATE` | `chrome124` | Browser-Profil für die TLS-Impersonation. |
-| `PROXIES` | — | Komma-getrennte Proxy-Liste, wird bei Blockaden rotiert. |
+| `PROXIES` | — | Komma-getrennte Proxy-Liste für wenige Einträge. |
+| `PROXIES_FILE` | `proxies.txt` | Datei mit einer Proxy-Zeile je Zeile — für große Anbieterlisten. |
 | `PLAYWRIGHT_FALLBACK` | `true` | Headless-Chromium als Notnagel bei Challenges. |
 | `RATE_LIMIT_PER_DOMAIN` | `60` | Requests pro Minute und Domain über alle Suchen. |
 | `REQUEST_TIMEOUT` | `20` | Sekunden bis Abbruch einer Anfrage. |
