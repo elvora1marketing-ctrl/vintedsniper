@@ -120,6 +120,9 @@ class VintedSession:
         # Sekundentakt weiterzuklopfen (und das Log zuzumüllen), wird für eine
         # Weile gar nicht erst angefragt.
         self._blocked_until = 0.0
+        # Indizes von Proxys, die nicht funktionieren (Limit erreicht,
+        # Session abgelaufen). Werden bei der Rotation übersprungen.
+        self._dead_proxies: set[int] = set()
 
     # ------------------------------------------------------------------ Status
 
@@ -152,20 +155,56 @@ class VintedSession:
         proxy = self.settings.proxies[self._proxy_index % len(self.settings.proxies)]
         return {"http": proxy, "https": proxy}
 
+    def _mark_proxy_dead(self) -> None:
+        """Den aktuellen Proxy aus dem Rennen nehmen.
+
+        Bei großen Anbieterlisten sind einzelne Einträge regelmäßig unbrauchbar
+        (Bandbreite aufgebraucht, Session abgelaufen). Solche Proxys immer
+        wieder anzufassen kostet bei jedem Durchlauf Zeit.
+        """
+        if not self.settings.proxies:
+            return
+        index = self._proxy_index % len(self.settings.proxies)
+        if index not in self._dead_proxies:
+            self._dead_proxies.add(index)
+            log.warning(
+                "[%s] Proxy #%d ist unbrauchbar und wird übersprungen "
+                "(%d von %d noch nutzbar).",
+                self.host,
+                index + 1,
+                len(self.settings.proxies) - len(self._dead_proxies),
+                len(self.settings.proxies),
+            )
+        if len(self._dead_proxies) >= len(self.settings.proxies):
+            # Alle als tot markiert: eher ein allgemeines Netzproblem als
+            # tatsächlich lauter kaputte Proxys — noch einmal von vorn.
+            log.warning(
+                "[%s] Alle Proxys waren erfolglos — Liste wird zurückgesetzt.",
+                self.host,
+            )
+            self._dead_proxies.clear()
+
     def _rotate_proxy(self) -> None:
-        """Auf den nächsten Proxy weiterschalten.
+        """Auf den nächsten nutzbaren Proxy weiterschalten.
 
         Bei genau einem oder gar keinem Proxy gibt es nichts zu wechseln — dann
         bleibt es beim Backoff.
         """
-        if len(self.settings.proxies) > 1:
+        total = len(self.settings.proxies)
+        if total <= 1:
+            return
+
+        for _ in range(total):
             self._proxy_index += 1
-            log.info(
-                "[%s] Wechsle auf Proxy #%d von %d.",
-                self.host,
-                self._proxy_index % len(self.settings.proxies) + 1,
-                len(self.settings.proxies),
-            )
+            if self._proxy_index % total not in self._dead_proxies:
+                break
+
+        log.info(
+            "[%s] Wechsle auf Proxy #%d von %d.",
+            self.host,
+            self._proxy_index % total + 1,
+            total,
+        )
 
     def _base_headers(self) -> dict[str, str]:
         # curl_cffi setzt bei aktiver Impersonation User-Agent und die
@@ -370,6 +409,16 @@ class VintedSession:
                         continue
                     self._rotate_proxy()
                     await self._backoff(attempt)
+                    continue
+                except VintedError as exc:
+                    # Keine Blockade, sondern die Verbindung selbst scheitert —
+                    # bei gesetztem Proxy heißt das praktisch immer: dieser
+                    # Proxy ist kaputt (Limit erreicht, abgelaufen, tot). Ohne
+                    # Weiterschalten bliebe die Suche für immer daran hängen.
+                    last_error = exc
+                    log.warning("[%s] %s", self.host, exc)
+                    self._mark_proxy_dead()
+                    self._rotate_proxy()
                     continue
 
                 await self._limiter.acquire()
