@@ -79,6 +79,11 @@ class SniperBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.db.connect()
+        # Das Panel bewusst als Erstes: es hängt nur an Datenbank und Monitor.
+        # Käme es später, wäre es so lange nicht erreichbar, wie Discord beim
+        # Registrieren der Befehle braucht — und wenn Discord dabei mit 429
+        # bremst, sind das Minuten, in denen ein Reverse-Proxy nur 502 liefert.
+        await self.panel.start()
 
         from .commands import ChannelCommands, StatusCommand, WatchCommands
 
@@ -155,7 +160,6 @@ class SniperBot(commands.Bot):
 
         await self._register_commands()
         await self._sync_file_searches()
-        await self.panel.start()
         started = await self.monitor.start_all()
         log.info("%d gespeicherte Suchen gestartet.", started)
 
