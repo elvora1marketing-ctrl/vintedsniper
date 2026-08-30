@@ -241,9 +241,23 @@ nach dem ersten Durchlauf mit Fehler in der Übersicht.
 ### Dieselbe Suche in mehreren Ländern
 
 Derselbe Artikel kostet in Frankreich oder Italien oft deutlich weniger als in
-Deutschland — wer nur `.de` beobachtet, sieht ihn nie. Beide Formulare und
-beide Slash-Commands nehmen deshalb zusätzliche Länder entgegen: im Panel als
-Ankreuzfelder, in Discord als `laender: fr, nl, it`.
+Deutschland — wer nur `.de` beobachtet, sieht ihn nie.
+
+**Automatisch für alles**, in der `.env`:
+
+```
+EXTRA_COUNTRIES=fr,nl,it,es,be,at
+```
+
+Ab dann läuft jede Suche zusätzlich in diesen Ländern — auch die, die schon
+angelegt sind: beim nächsten Start werden die fehlenden Kopien ergänzt. Nimmst
+du ein Land wieder heraus, verschwinden dessen Suchen beim nächsten Start
+wieder. Im Panel sind die eingestellten Länder vorausgewählt, in Discord gilt
+`EXTRA_COUNTRIES`, wenn du bei `/watch add` nichts angibst (`laender: -`
+schaltet es für einen Aufruf ab).
+
+**Oder von Fall zu Fall**: im Panel die Ankreuzfelder unter dem Adressfeld, in
+Discord `laender: fr, nl, it`.
 
 Aus einer Adresse werden dann mehrere Suchen — eine je Land, mit denselben
 Filtern. Erkannt werden alle 22 Vinted-Länder, in jeder Schreibweise: `fr`,
@@ -262,6 +276,10 @@ Zwei Dinge, die dabei wichtig sind:
   Währung ausdrücklich mitgegeben, damit aus „bis 40 EUR" nicht klammheimlich
   „bis 40 PLN" wird — und du bekommst einen Hinweis dazu. Bei den EUR-Ländern
   (fr, nl, it, es, be, at …) stellt sich die Frage nicht.
+- **Jedes Land fragt eigenständig ab.** Fünf Länder bei drei Suchen sind
+  achtzehn Suchen. Die verteilen sich zwar auf sechs Domains, trotzdem gilt:
+  je mehr Länder, desto länger sollte das Intervall sein. 60 Sekunden sind
+  vernünftig, 20 bei achtzehn Suchen nicht.
 
 Der Parser übernimmt `search_text`, `catalog_ids`, `brand_ids`, `size_ids`,
 `status_ids`, `color_ids`, `material_ids`, `price_from`, `price_to` und
@@ -394,6 +412,7 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `PANEL_PASSWORD` | — | Passwort fürs Web-Panel. Leer = Panel bleibt aus. |
 | `PANEL_DOMAIN` | — | Domain fürs Panel. Nur für den mitgelieferten Caddy (`--profile standalone`); ein vorhandener Reverse-Proxy kennt seine Domain selbst. |
 | `PANEL_PORT` | `8080` | Port auf `127.0.0.1` des Hosts. Nur bei Konflikten ändern. |
+| `EXTRA_COUNTRIES` | — | Länder, in denen **jede** Suche zusätzlich läuft, z. B. `fr,nl,it`. Leer = nur die Domain aus der Such-URL. |
 | `ALERT_RETENTION_HOURS` | `0` | Alerts, die älter sind, werden automatisch gelöscht. `0` = aus. |
 | `CLEANUP_CHANNELS` | — | Channel-IDs zum Aufräumen. Leer = die Channels, in die der Bot selbst alertet. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |

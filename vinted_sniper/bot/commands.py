@@ -157,6 +157,20 @@ class WatchCommands(commands.Cog):
 
     # ------------------------------------------------------------------ Helfer
 
+    def _laender(self, eingabe: str | None) -> tuple[list[domains.Domain], list[str]]:
+        """Länderangabe auswerten — ohne Angabe gilt die Voreinstellung.
+
+        `EXTRA_COUNTRIES` in der `.env` legt fest, wo jede Suche zusätzlich
+        laufen soll. Wer beim Befehl nichts angibt, bekommt genau das; wer
+        etwas angibt, überschreibt es für diesen einen Aufruf. `-` schaltet die
+        Voreinstellung für diesen Aufruf ab.
+        """
+        if eingabe is None or not eingabe.strip():
+            return [domains.lookup(h) for h in self.bot.settings.extra_countries], []
+        if eingabe.strip() in {"-", "keine", "none"}:
+            return [], []
+        return domains.parse_list(eingabe)
+
     async def _owned_watch(
         self, interaction: discord.Interaction, watch_id: int
     ) -> Watch | None:
@@ -196,7 +210,7 @@ class WatchCommands(commands.Cog):
             await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
             return
 
-        extra, unbekannt = domains.parse_list(laender or "")
+        extra, unbekannt = self._laender(laender)
         if unbekannt:
             await interaction.response.send_message(
                 f"❌ Unbekannte Länder: {', '.join(unbekannt)}. "
@@ -387,7 +401,7 @@ class WatchCommands(commands.Cog):
             )
             return
 
-        extra, unbekannt = domains.parse_list(laender or "")
+        extra, unbekannt = self._laender(laender)
         if unbekannt:
             await interaction.response.send_message(
                 f"❌ Unbekannte Länder: {', '.join(unbekannt)}. "

@@ -44,6 +44,7 @@ class PanelServer:
         min_interval: int,
         default_interval: int,
         started_at: Any,
+        default_countries: tuple[str, ...] = (),
     ) -> None:
         self.db = db
         self.monitor = monitor
@@ -55,6 +56,7 @@ class PanelServer:
         self.min_interval = min_interval
         self.default_interval = default_interval
         self.started_at = started_at
+        self.default_countries = default_countries
 
         self._runner: web.AppRunner | None = None
 
@@ -171,6 +173,7 @@ class PanelServer:
                 started_at=self.started_at,
                 message=request.query.get("ok"),
                 error=request.query.get("err"),
+                default_countries=self.default_countries,
             ),
             content_type="text/html",
             charset="utf-8",

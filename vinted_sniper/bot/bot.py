@@ -67,6 +67,7 @@ class SniperBot(commands.Bot):
             min_interval=settings.min_interval,
             default_interval=settings.default_interval,
             started_at=self.started_at,
+            default_countries=settings.extra_countries,
         )
         self._send_lock = asyncio.Lock()
         self._cleanup_task: asyncio.Task[None] | None = None
@@ -128,6 +129,7 @@ class SniperBot(commands.Bot):
                 # Im Bot-Modus werden Suchen per Slash-Command verwaltet — eine
                 # leere oder fehlende Datei ist hier völlig normal.
                 allow_empty=True,
+                extra_countries=self.settings.extra_countries,
             )
         except InvalidSearchFile as exc:
             log.error("%s wird ignoriert: %s", self.settings.searches_path, exc)

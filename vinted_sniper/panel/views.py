@@ -326,22 +326,30 @@ _MARK = (
 _ANGEBOTENE_LAENDER = ("de", "fr", "nl", "it", "es", "be", "at", "pl", "uk")
 
 
-def _laender_auswahl(feld_id: str) -> str:
-    """Ankreuzfelder für die gängigen Länderdomains."""
+def _laender_auswahl(feld_id: str, vorausgewaehlt: tuple[str, ...] = ()) -> str:
+    """Ankreuzfelder für die gängigen Länderdomains.
+
+    `vorausgewaehlt` sind Hosts aus `EXTRA_COUNTRIES` — was dort steht, gilt
+    ohnehin für jede neue Suche, also ist es hier auch angekreuzt.
+    """
+    aktiv = {domains.normalize_host(h) for h in vorausgewaehlt}
     chips = []
     for kuerzel in _ANGEBOTENE_LAENDER:
         domain = domains.resolve(kuerzel)
         if domain is None:
             continue
         label = domain.host.removeprefix("www.vinted.")
+        haken = " checked" if domain.host in aktiv else ""
         chips.append(
             f'<label class=chip><input type=checkbox name=laender '
-            f'value="{escape(kuerzel)}" id="{escape(feld_id)}-{escape(kuerzel)}">'
+            f'value="{escape(kuerzel)}" '
+            f'id="{escape(feld_id)}-{escape(kuerzel)}"{haken}>'
             f"<span>{domain.flag} .{escape(label)}</span></label>"
         )
+    zusatz = " — aus EXTRA_COUNTRIES vorausgewählt" if aktiv else ""
     return (
         "<fieldset class=laender>"
-        "<legend>Zusätzlich in diesen Ländern suchen</legend>"
+        f"<legend>Zusätzlich in diesen Ländern suchen{zusatz}</legend>"
         f"<div class=chips>{''.join(chips)}</div>"
         "</fieldset>"
     )
@@ -450,6 +458,7 @@ def dashboard(
     started_at: dt.datetime,
     message: str | None = None,
     error: str | None = None,
+    default_countries: tuple[str, ...] = (),
 ) -> str:
     flash = ""
     if error:
@@ -524,7 +533,7 @@ def dashboard(
                    aria-label="Intervall in Sekunden">
             <button type=submit>Hinzufügen</button>
           </div>
-          {_laender_auswahl("neu")}
+          {_laender_auswahl("neu", default_countries)}
           <div class=hint>
             Suche auf Vinted zusammenklicken, Adresszeile kopieren, hier einfügen.
             Alle Filter kommen mit. Die Adresse wird sofort getestet.
@@ -545,7 +554,7 @@ def dashboard(
                        aria-label="Intervall in Sekunden">
                 <button type=submit>Alle importieren</button>
               </div>
-              {_laender_auswahl("bulk")}
+              {_laender_auswahl("bulk", default_countries)}
               <div class=hint>
                 Leerzeilen, Kommentare mit <code>#</code>, doppelte und bereits
                 angelegte Suchen werden übersprungen. Ein Name lässt sich mit

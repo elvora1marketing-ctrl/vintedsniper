@@ -29,6 +29,7 @@ async def run_webhook_mode(settings: Settings) -> int:
             default_interval=settings.default_interval,
             min_interval=settings.min_interval,
             default_webhook=settings.alert_webhook_url,
+            extra_countries=settings.extra_countries,
         )
     except InvalidSearchFile as exc:
         log.error("%s", exc)
@@ -63,6 +64,7 @@ async def run_webhook_mode(settings: Settings) -> int:
         min_interval=settings.min_interval,
         default_interval=settings.default_interval,
         started_at=dt.datetime.now(dt.timezone.utc),
+        default_countries=settings.extra_countries,
     )
 
     try:

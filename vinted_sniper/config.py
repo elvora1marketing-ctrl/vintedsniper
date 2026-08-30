@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .proxies import load_proxies
+from .vinted import domains
 
 load_dotenv()
 
@@ -58,6 +59,19 @@ def _ids(name: str) -> tuple[int, ...]:
     return tuple(werte)
 
 
+def _countries(name: str) -> tuple[str, ...]:
+    """Länderliste wie `fr,nl,it` zu Vinted-Hosts auflösen."""
+    gefunden, unbekannt = domains.parse_list(os.getenv(name, ""))
+    for eintrag in unbekannt:
+        log.warning(
+            "%s: „%s“ ist kein bekanntes Vinted-Land und wird übersprungen. "
+            "Erlaubt sind Kürzel wie fr, nl, it, es oder uk.",
+            name,
+            eintrag,
+        )
+    return tuple(d.host for d in gefunden)
+
+
 class Mode(str, Enum):
     """Wie der Sniper betrieben wird.
 
@@ -89,6 +103,12 @@ class Settings:
     panel_password: str
     panel_host: str
     panel_port: int
+
+    # --- Länder ---
+    # Jede Suche läuft zusätzlich automatisch auf diesen Domains. Derselbe
+    # Artikel kostet im Ausland oft weniger — wer nur eine Domain beobachtet,
+    # sieht ihn nie. Leer = nur die Domain aus der jeweiligen Such-URL.
+    extra_countries: tuple[str, ...]
 
     # --- Aufräumen ---
     # Alerts älter als das werden automatisch gelöscht. 0 = aus.
@@ -157,6 +177,7 @@ class Settings:
             panel_password=os.getenv("PANEL_PASSWORD", "").strip(),
             panel_host=os.getenv("PANEL_HOST", "0.0.0.0").strip() or "0.0.0.0",
             panel_port=_int("PANEL_PORT", 8080),
+            extra_countries=_countries("EXTRA_COUNTRIES"),
             alert_retention_hours=max(0, _int("ALERT_RETENTION_HOURS", 0)),
             cleanup_channel_ids=_ids("CLEANUP_CHANNELS"),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),

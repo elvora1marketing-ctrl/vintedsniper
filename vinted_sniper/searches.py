@@ -14,8 +14,9 @@ import logging
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
+from .vinted import domains
 from .vinted.urls import InvalidSearchURL, SearchQuery, parse_search_url
 
 if TYPE_CHECKING:
@@ -45,6 +46,36 @@ url = "https://www.vinted.de/catalog?search_text=nike+air+max&price_to=60"
 """
 
 
+def mirror(search: FileSearch, hosts: Sequence[str]) -> list[FileSearch]:
+    """Eine Datei-Suche zusätzlich auf weiteren Länderdomains anlegen.
+
+    Der Name der Ausgangssuche bleibt unverändert — sie behält damit ihre
+    Historie, auch wenn die Länderliste später wieder verschwindet. Die Kopien
+    hängen ihr Länderkürzel an und werden über genau diesen Namen
+    wiedergefunden: fällt ein Land aus der Konfiguration, verschwindet beim
+    nächsten Start auch seine Suche.
+    """
+    ergebnis = [search]
+    gesehen = {search.query.host}
+    for host in hosts:
+        normalisiert = domains.normalize_host(host)
+        if normalisiert in gesehen:
+            continue
+        gesehen.add(normalisiert)
+        query = search.query.for_host(normalisiert)
+        domain = domains.lookup(normalisiert)
+        ergebnis.append(
+            FileSearch(
+                name=f"{search.name} {domain.flag}"[:80],
+                query=query,
+                interval=search.interval,
+                webhook_url=search.webhook_url,
+                source_url=query.web_url(),
+            )
+        )
+    return ergebnis
+
+
 def load_searches(
     path: Path,
     *,
@@ -52,6 +83,7 @@ def load_searches(
     min_interval: int,
     default_webhook: str,
     allow_empty: bool = False,
+    extra_countries: Sequence[str] = (),
 ) -> list[FileSearch]:
     """`searches.toml` einlesen und validieren.
 
@@ -158,6 +190,27 @@ def load_searches(
                 source_url=query.web_url(),
             )
         )
+
+    # Die Kopien für weitere Länder entstehen erst, wenn die ganze Datei
+    # gelesen ist: nur so kann eine selbst benannte Suche eine gleichnamige
+    # Kopie verdrängen und nicht umgekehrt.
+    if extra_countries:
+        erweitert: list[FileSearch] = []
+        for basis in searches:
+            for kopie in mirror(basis, extra_countries):
+                if kopie is basis:
+                    erweitert.append(kopie)
+                    continue
+                if kopie.name in seen_names:
+                    log.info(
+                        "Kopie „%s“ übersprungen — den Namen vergibt die Datei "
+                        "bereits selbst.",
+                        kopie.name,
+                    )
+                    continue
+                seen_names.add(kopie.name)
+                erweitert.append(kopie)
+        searches = erweitert
 
     if not searches and not allow_empty:
         raise InvalidSearchFile(f"In {path} steht keine einzige Suche.\n\n{EXAMPLE}")

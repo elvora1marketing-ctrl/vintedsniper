@@ -214,5 +214,62 @@ class ExampleFileTests(unittest.TestCase):
         self.assertTrue(all(s.query.host.startswith("www.vinted.") for s in searches))
 
 
+class ExtraCountriesTests(unittest.TestCase):
+    """`EXTRA_COUNTRIES`: jede Suche läuft automatisch auch im Ausland."""
+
+    DATEI = """
+[[search]]
+name = "Nike"
+url = "https://www.vinted.de/catalog?search_text=nike&price_to=40"
+"""
+
+    def laden(self, laender):
+        return load_searches(write(self.DATEI), **DEFAULTS, extra_countries=laender)
+
+    def test_ohne_angabe_bleibt_es_bei_einer(self):
+        self.assertEqual(len(self.laden(())), 1)
+
+    def test_je_land_eine_eigene_suche(self):
+        searches = self.laden(("www.vinted.fr", "www.vinted.it"))
+        self.assertEqual(
+            [s.query.host for s in searches],
+            ["www.vinted.de", "www.vinted.fr", "www.vinted.it"],
+        )
+
+    def test_ausgangssuche_behaelt_ihren_namen(self):
+        # Der Name ist der Schlüssel zur Historie — er darf sich nicht ändern,
+        # bloß weil jemand Länder hinzuschaltet.
+        searches = self.laden(("www.vinted.fr",))
+        self.assertEqual(searches[0].name, "Nike")
+        self.assertEqual(searches[1].name, "Nike 🇫🇷")
+
+    def test_filter_werden_uebernommen(self):
+        kopie = self.laden(("www.vinted.fr",))[1]
+        self.assertEqual(kopie.query.scalars["search_text"], "nike")
+        self.assertEqual(kopie.query.scalars["price_to"], "40")
+        self.assertIn("vinted.fr", kopie.source_url)
+
+    def test_ausgangsdomain_wird_nicht_verdoppelt(self):
+        searches = self.laden(("www.vinted.de", "www.vinted.fr"))
+        self.assertEqual(len(searches), 2)
+
+    def test_namenskollision_ueberschreibt_keine_bestehende_suche(self):
+        datei = write("""
+[[search]]
+name = "Nike"
+url = "https://www.vinted.de/catalog?search_text=nike"
+
+[[search]]
+name = "Nike 🇫🇷"
+url = "https://www.vinted.fr/catalog?search_text=etwas+anderes"
+""")
+        searches = load_searches(datei, **DEFAULTS, extra_countries=("www.vinted.fr",))
+        namen = [s.name for s in searches]
+        self.assertEqual(namen.count("Nike 🇫🇷"), 1)
+        # Die selbst benannte Suche gewinnt, die Kopie wird verworfen.
+        eigene = next(s for s in searches if s.name == "Nike 🇫🇷")
+        self.assertEqual(eigene.query.scalars["search_text"], "etwas anderes")
+
+
 if __name__ == "__main__":
     unittest.main()
