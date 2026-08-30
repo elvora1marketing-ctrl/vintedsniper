@@ -14,6 +14,7 @@ from ..config import Settings
 from ..db import Database, Watch
 from ..monitor import Monitor
 from ..notifiers import WebhookNotifier
+from ..panel.app import PanelServer
 from ..searches import InvalidSearchFile, load_searches, sync_to_db
 from ..vinted.client import VintedClient
 from ..vinted.models import Item
@@ -49,6 +50,20 @@ class SniperBot(commands.Bot):
             on_recovered=self._deliver_recovered,
         )
         self.started_at = dt.datetime.now(dt.timezone.utc)
+        # Dasselbe Panel wie im Webhook-Modus: gleiche Datenbank, gleicher
+        # Monitor. Was dort geändert wird, wirkt sofort auch hier.
+        self.panel = PanelServer(
+            db=self.db,
+            monitor=self.monitor,
+            client=self.client,
+            password=settings.panel_password,
+            alert_webhook_url=settings.alert_webhook_url,
+            host=settings.panel_host,
+            port=settings.panel_port,
+            min_interval=settings.min_interval,
+            default_interval=settings.default_interval,
+            started_at=self.started_at,
+        )
         self._send_lock = asyncio.Lock()
         # `on_ready` feuert auch nach jedem Reconnect — der Startlauf darf aber
         # nur einmal passieren.
@@ -132,11 +147,13 @@ class SniperBot(commands.Bot):
 
         await self._register_commands()
         await self._sync_file_searches()
+        await self.panel.start()
         started = await self.monitor.start_all()
         log.info("%d gespeicherte Suchen gestartet.", started)
 
     async def close(self) -> None:
         await self.monitor.shutdown()
+        await self.panel.close()
         await self.webhooks.close()
         await self.db.close()
         await super().close()

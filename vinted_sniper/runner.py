@@ -8,12 +8,14 @@ die einzige Steuerung.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 
 from .config import Settings
 from .db import Database, DatabaseUnavailable
 from .monitor import Monitor
 from .notifiers import WebhookNotifier
+from .panel.app import PanelServer
 from .searches import InvalidSearchFile, load_searches, sync_to_db
 from .vinted.client import VintedClient
 
@@ -50,6 +52,19 @@ async def run_webhook_mode(settings: Settings) -> int:
         on_recovered=notifier.send_recovered,
     )
 
+    panel = PanelServer(
+        db=db,
+        monitor=monitor,
+        client=client,
+        password=settings.panel_password,
+        alert_webhook_url=settings.alert_webhook_url,
+        host=settings.panel_host,
+        port=settings.panel_port,
+        min_interval=settings.min_interval,
+        default_interval=settings.default_interval,
+        started_at=dt.datetime.now(dt.timezone.utc),
+    )
+
     try:
         watches = await sync_to_db(db, file_searches)
         log.info("%d Suche(n) aus %s übernommen.", len(watches), settings.searches_path)
@@ -59,6 +74,7 @@ async def run_webhook_mode(settings: Settings) -> int:
             # das wüsste er erst beim ersten Treffer, ob überhaupt etwas ankommt.
             await notifier.send_startup(settings.alert_webhook_url, watches)
 
+        await panel.start()
         started = await monitor.start_all()
         log.info("%d Suche(n) laufen. Beenden mit Strg-C.", started)
 
@@ -69,6 +85,7 @@ async def run_webhook_mode(settings: Settings) -> int:
         log.info("Abbruch empfangen.")
     finally:
         await monitor.shutdown()
+        await panel.close()
         await notifier.close()
         await db.close()
 

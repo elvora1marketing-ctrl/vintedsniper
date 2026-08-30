@@ -21,11 +21,34 @@ services:
       - ./proxies.txt:/app/proxies.txt:ro
     # Chromium braucht beim Fallback kurzzeitig spürbar Speicher.
     shm_size: 512mb
+    # Kein Port nach außen: an das Panel kommt man nur über Caddy, damit die
+    # Verbindung immer verschlüsselt ist.
+    expose:
+      - "8080"
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: vinted-caddy
+    restart: unless-stopped
+    depends_on:
+      - sniper
+    environment:
+      # Domain aus der .env — Caddy besorgt dafür automatisch ein Zertifikat.
+      PANEL_DOMAIN: ${PANEL_DOMAIN:?PANEL_DOMAIN fehlt in der .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   sniper-data:
+  caddy-data:
+  caddy-config:

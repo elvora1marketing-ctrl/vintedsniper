@@ -270,11 +270,12 @@ class Database:
         sql = "SELECT * FROM watches ORDER BY id"
         args: tuple[int, ...] = ()
         if guild_id is not None:
-            # Datei-Suchen gehören zur Instanz, nicht zu einem Server — ohne
-            # sie hier wären sie in `/watch list` unsichtbar und niemand käme
-            # auf die Idee, sie mit `/watch import` zu übernehmen.
+            # Suchen aus Datei und Panel gehören zur Instanz, nicht zu einem
+            # Server. Ohne sie hier wären sie in `/watch list` unsichtbar —
+            # und niemand käme auf die Idee, sie zu übernehmen.
             sql = (
-                "SELECT * FROM watches WHERE guild_id = ? OR origin = 'file' "
+                "SELECT * FROM watches "
+                "WHERE guild_id = ? OR origin IN ('file', 'panel') "
                 "ORDER BY id"
             )
             args = (guild_id,)

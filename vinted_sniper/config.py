@@ -71,6 +71,13 @@ class Settings:
     # Suchdefinitionen für den Webhook-Modus.
     searches_path: Path
 
+    # --- Web-Panel ---
+    # Leer = Panel bleibt aus. Ohne Passwort könnte sonst jeder die Suchen
+    # ändern, der die Adresse kennt.
+    panel_password: str
+    panel_host: str
+    panel_port: int
+
     # --- Speicher ---
     db_path: Path
 
@@ -127,6 +134,9 @@ class Settings:
             guild_id=guild_id,
             alert_webhook_url=webhook,
             searches_path=Path(os.getenv("SEARCHES_PATH", "searches.toml")),
+            panel_password=os.getenv("PANEL_PASSWORD", "").strip(),
+            panel_host=os.getenv("PANEL_HOST", "0.0.0.0").strip() or "0.0.0.0",
+            panel_port=_int("PANEL_PORT", 8080),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),
             default_interval=default_interval,
             min_interval=min_interval,

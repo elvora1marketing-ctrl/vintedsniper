@@ -1,0 +1,14 @@
+# Caddy holt und erneuert das TLS-Zertifikat automatisch (Let's Encrypt).
+# Voraussetzung: PANEL_DOMAIN zeigt per DNS-A-Eintrag auf diesen Server und
+# die Ports 80 und 443 sind erreichbar.
+{$PANEL_DOMAIN} {
+	reverse_proxy sniper:8080
+	encode gzip
+
+	# Das Panel ist nur für dich — Suchmaschinen haben hier nichts zu suchen.
+	header {
+		X-Robots-Tag "noindex, nofollow"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+}

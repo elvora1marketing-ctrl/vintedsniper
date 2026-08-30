@@ -125,6 +125,33 @@ Läuft. In Discord jetzt `/watch add` tippen.
 
 ---
 
+## Web-Panel
+
+Suchen im Browser verwalten statt per Datei oder Slash-Command. Alerts kommen
+weiterhin ausschließlich in Discord an — das Panel zeigt an und verwaltet.
+
+Es läuft im selben Prozess wie der Sniper und teilt sich Datenbank und Monitor:
+was du dort änderst, wirkt **sofort**, ohne Neustart. In beiden Betriebsarten
+verfügbar.
+
+**Einrichten:** In der `.env` ein Passwort und die Domain setzen …
+
+```
+PANEL_PASSWORD=ein-langes-passwort
+PANEL_DOMAIN=vinted.example.de
+```
+
+… einen DNS-A-Eintrag für die Domain auf den Server zeigen lassen, dann
+`docker compose up -d --build`. Caddy besorgt das HTTPS-Zertifikat automatisch
+und erneuert es selbst; der Sniper selbst hat keinen offenen Port nach außen.
+
+Ohne `PANEL_PASSWORD` startet das Panel gar nicht erst — sonst könnte jeder die
+Suchen ändern, der die Adresse kennt. Die Anmeldung läuft über ein Formular mit
+signiertem `SameSite=Strict`-Cookie: damit kann keine fremde Seite Aktionen im
+Panel auslösen, während du angemeldet bist.
+
+---
+
 ## Befehle (nur Bot-Modus)
 
 | Befehl | Wirkung |
@@ -279,6 +306,9 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `DISCORD_TOKEN` | — | Bot-Token. Gesetzt = Slash-Commands. |
 | `DISCORD_GUILD_ID` | — | Optional. Leer = Befehle werden auf allen Servern des Bots registriert. |
 | `SEARCHES_PATH` | `searches.toml` | Suchdefinitionen für den Webhook-Modus. |
+| `PANEL_PASSWORD` | — | Passwort fürs Web-Panel. Leer = Panel bleibt aus. |
+| `PANEL_DOMAIN` | — | Domain fürs Panel; Caddy holt dafür ein HTTPS-Zertifikat. |
+| `PANEL_PORT` | `8080` | Port im Container. Nur bei Konflikten ändern. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
 | `MIN_INTERVAL` | `20` | Untergrenze, die `/watch interval` nicht unterschreitet. |
 | `PER_PAGE` | `20` | Artikel pro Abfrage. |
@@ -334,6 +364,10 @@ vinted_sniper/
 ├── monitor.py           Polling-Schleife, ein Task pro Suche
 ├── searches.py          searches.toml lesen und mit der DB abgleichen
 ├── notifiers.py         Alert-Zustellung per Webhook
+├── panel/
+│   ├── app.py           Webserver und Routen
+│   ├── auth.py          Anmeldung (signiertes Cookie)
+│   └── views.py         HTML der beiden Seiten
 ├── runner.py            Webhook-Modus (ohne Bot-Token)
 ├── embeds.py            Discord-Darstellung (beide Modi)
 ├── vinted/
