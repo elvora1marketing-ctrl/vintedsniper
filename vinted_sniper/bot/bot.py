@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands
 
 from .. import embeds
+from . import cleanup
 from ..config import Settings
 from ..db import Database, Watch
 from ..monitor import Monitor
@@ -27,6 +28,9 @@ SEND_DELAY = 0.7
 # Wenn ein Poll-Durchlauf mehr liefert, stimmt meist der Filter nicht — dann
 # eine Sammelmeldung statt hundert Einzelposts.
 MAX_ALERTS_PER_ROUND = 10
+# Wie oft nach abgelaufenen Alerts geschaut wird. Halbstündlich reicht: die
+# Aufbewahrungsdauer ist in Stunden angegeben, minutengenau muss das nicht sein.
+CLEANUP_EVERY = 1800
 
 
 class SniperBot(commands.Bot):
@@ -65,6 +69,7 @@ class SniperBot(commands.Bot):
             started_at=self.started_at,
         )
         self._send_lock = asyncio.Lock()
+        self._cleanup_task: asyncio.Task[None] | None = None
         # `on_ready` feuert auch nach jedem Reconnect — der Startlauf darf aber
         # nur einmal passieren.
         self._bootstrapped = False
@@ -152,7 +157,77 @@ class SniperBot(commands.Bot):
         started = await self.monitor.start_all()
         log.info("%d gespeicherte Suchen gestartet.", started)
 
+        if self.settings.alert_retention_hours:
+            self._cleanup_task = self.loop.create_task(self._cleanup_loop())
+
+    # -------------------------------------------------------------- Aufräumen
+
+    async def _cleanup_targets(self) -> list[discord.TextChannel]:
+        """Welche Channels aufgeräumt werden.
+
+        Ohne feste Angabe alle, in die der Bot selbst alertet. Suchen mit
+        Webhook-Ziel bleiben außen vor: aus einer Webhook-URL lässt sich der
+        Channel nicht ableiten — dafür muss die ID in `CLEANUP_CHANNELS` stehen.
+        """
+        ids = list(self.settings.cleanup_channel_ids)
+        if not ids:
+            ids = [
+                w.channel_id
+                for w in await self.db.list_watches()
+                if w.channel_id and not w.webhook_url
+            ]
+
+        channels: list[discord.TextChannel] = []
+        for channel_id in dict.fromkeys(ids):
+            channel = await self._resolve_channel(channel_id)
+            if isinstance(channel, discord.TextChannel):
+                channels.append(channel)
+        return channels
+
+    async def _cleanup_once(self) -> None:
+        stunden = self.settings.alert_retention_hours
+        for channel in await self._cleanup_targets():
+            me = channel.guild.me
+            if not cleanup.may_purge(channel, me):
+                log.warning(
+                    "Kein Aufräumen in #%s: mir fehlen dort die Rechte "
+                    "„Nachrichten verwalten“ und „Nachrichtenverlauf anzeigen“.",
+                    channel.name,
+                )
+                continue
+            try:
+                geloescht = await cleanup.purge_older_than(channel, hours=stunden)
+            except discord.HTTPException as exc:
+                log.warning("Aufräumen in #%s fehlgeschlagen: %s", channel.name, exc)
+                continue
+            if geloescht:
+                log.info(
+                    "%d Nachricht(en) älter als %dh in #%s gelöscht.",
+                    geloescht,
+                    stunden,
+                    channel.name,
+                )
+
+    async def _cleanup_loop(self) -> None:
+        await self.wait_until_ready()
+        log.info(
+            "Automatisches Aufräumen aktiv: Alerts älter als %dh werden gelöscht.",
+            self.settings.alert_retention_hours,
+        )
+        while not self.is_closed():
+            try:
+                await self._cleanup_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Aufräumen ist Nebensache — ein Fehler hier darf den Sniper
+                # nicht mitreißen.
+                log.exception("Aufräumen fehlgeschlagen.")
+            await asyncio.sleep(CLEANUP_EVERY)
+
     async def close(self) -> None:
+        if self._cleanup_task is not None:
+            self._cleanup_task.cancel()
         await self.monitor.shutdown()
         await self.panel.close()
         await self.webhooks.close()

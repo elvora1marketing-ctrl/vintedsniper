@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .vinted import domains
 from .vinted.urls import InvalidSearchURL, SearchQuery, parse_search_url
 
 # Obergrenze pro Vorgang. Nicht wegen der Technik, sondern weil jede Suche
@@ -123,6 +124,41 @@ def parse_import(text: str) -> ImportPlan:
         )
 
     return plan
+
+
+def expand(query: SearchQuery, extra: list[domains.Domain]) -> list[SearchQuery]:
+    """Dieselbe Suche zusätzlich auf weiteren Länderdomains anlegen.
+
+    Der Sinn: derselbe Artikel kostet in Frankreich oft weniger als in
+    Deutschland, und wer nur `.de` beobachtet, sieht ihn nie. Jede Domain wird
+    eine eigene Suche mit eigenem Bestand — sonst würde ein Fund in Italien den
+    identischen Fund in Frankreich verschlucken.
+    """
+    ergebnis = [query]
+    gesehen = {query.host}
+    for domain in extra:
+        if domain.host in gesehen:
+            continue
+        gesehen.add(domain.host)
+        ergebnis.append(query.for_host(domain.host))
+    return ergebnis
+
+
+def currency_warning(query: SearchQuery, extra: list[domains.Domain]) -> str:
+    """Hinweis, wenn ein Preisfilter auf eine andere Währung trifft."""
+    if not query.scalars.keys() & {"price_from", "price_to"}:
+        return ""
+    abweichend = [
+        d for d in extra if d.currency != query.domain.currency and d.host != query.host
+    ]
+    if not abweichend:
+        return ""
+    namen = ", ".join(f"{d.flag} {d.currency}" for d in abweichend)
+    return (
+        f"Achtung: Dein Preisfilter ist in {query.domain.currency}, "
+        f"dort wird in einer anderen Währung gerechnet ({namen}). "
+        "Die Grenze wird mitgegeben, kann aber anders greifen als erwartet."
+    )
 
 
 def summarize(plan: ImportPlan, *, angelegt: int, bekannt: int = 0) -> str:

@@ -82,6 +82,26 @@ class SearchQuery:
         params.setdefault("currency", self.domain.currency)
         return params
 
+    def for_host(self, host: str) -> "SearchQuery":
+        """Dieselbe Suche auf einer anderen Länderdomain.
+
+        Kategorie-, Marken- und Größen-IDs sind bei Vinted länderübergreifend
+        dieselben — nur die Währung hängt am Land. Steht ein Preisfilter drin
+        und rechnet das Ziel in einer anderen Währung, wird die ursprüngliche
+        Währung ausdrücklich mitgegeben: sonst würde aus „bis 40 EUR"
+        klammheimlich „bis 40 PLN".
+        """
+        scalars = dict(self.scalars)
+        ziel = domains.lookup(host)
+        hat_preisfilter = bool(scalars.keys() & {"price_from", "price_to"})
+        if hat_preisfilter and ziel.currency != self.domain.currency:
+            scalars.setdefault("currency", self.domain.currency)
+        return SearchQuery(
+            host=domains.normalize_host(host),
+            lists={key: list(values) for key, values in self.lists.items()},
+            scalars=scalars,
+        )
+
     def web_url(self) -> str:
         """Menschenlesbare Such-URL zurückbauen (für Embeds/`/watch list`)."""
         parts: list[str] = []

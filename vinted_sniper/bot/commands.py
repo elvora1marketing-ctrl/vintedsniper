@@ -13,6 +13,7 @@ from ..vinted import domains
 from ..vinted.session import VintedError
 from ..vinted.urls import InvalidSearchURL, SearchQuery, parse_search_url
 from .. import bulk, embeds
+from . import cleanup
 
 if TYPE_CHECKING:
     from .bot import SniperBot
@@ -62,12 +63,17 @@ class BulkImportModal(discord.ui.Modal, title="Suchen importieren"):
     )
 
     def __init__(
-        self, bot: "SniperBot", channel: discord.TextChannel, interval: int
+        self,
+        bot: "SniperBot",
+        channel: discord.TextChannel,
+        interval: int,
+        extra: list[domains.Domain] | None = None,
     ) -> None:
         super().__init__()
         self.bot = bot
         self.channel = channel
         self.interval = interval
+        self.extra = extra or []
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         plan = bulk.parse_import(str(self.urls))
@@ -90,21 +96,28 @@ class BulkImportModal(discord.ui.Modal, title="Suchen importieren"):
         bekannt = 0
 
         for entry in plan.entries:
-            if entry.url in vorhanden:
-                bekannt += 1
-                continue
-            watch = await self.bot.db.add_watch(
-                guild_id=interaction.guild_id or 0,
-                channel_id=self.channel.id,
-                creator_id=interaction.user.id,
-                name=entry.name,
-                query=entry.query,
-                source_url=entry.url,
-                interval=self.interval,
-            )
-            vorhanden.add(entry.url)
-            self.bot.monitor.start(watch)
-            angelegt.append(watch)
+            queries = bulk.expand(entry.query, self.extra)
+            for einzeln in queries:
+                url = einzeln.web_url()
+                if url in vorhanden:
+                    bekannt += 1
+                    continue
+                vorhanden.add(url)
+                watch = await self.bot.db.add_watch(
+                    guild_id=interaction.guild_id or 0,
+                    channel_id=self.channel.id,
+                    creator_id=interaction.user.id,
+                    name=(
+                        f"{entry.name} {einzeln.domain.flag}"
+                        if len(queries) > 1
+                        else entry.name
+                    )[:80],
+                    query=einzeln,
+                    source_url=url,
+                    interval=self.interval,
+                )
+                self.bot.monitor.start(watch)
+                angelegt.append(watch)
 
         beschreibung = "\n".join(f"• #{w.id} · {w.name}" for w in angelegt[:15])
         if len(angelegt) > 15:
@@ -164,6 +177,7 @@ class WatchCommands(commands.Cog):
         name="Anzeigename für die Suche (optional)",
         channel="Channel für die Alerts (Standard: hier)",
         interval="Prüfintervall in Sekunden (optional)",
+        laender="Zusätzliche Länder, z. B. fr, nl, it — je eine eigene Suche",
     )
     async def add(
         self,
@@ -172,6 +186,7 @@ class WatchCommands(commands.Cog):
         name: str | None = None,
         channel: discord.TextChannel | None = None,
         interval: int | None = None,
+        laender: str | None = None,
     ) -> None:
         settings = self.bot.settings
 
@@ -179,6 +194,15 @@ class WatchCommands(commands.Cog):
             query = parse_search_url(url)
         except InvalidSearchURL as exc:
             await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
+            return
+
+        extra, unbekannt = domains.parse_list(laender or "")
+        if unbekannt:
+            await interaction.response.send_message(
+                f"❌ Unbekannte Länder: {', '.join(unbekannt)}. "
+                "Erlaubt sind Kürzel wie `fr`, `nl`, `it` oder `uk`.",
+                ephemeral=True,
+            )
             return
 
         target = channel or interaction.channel
@@ -213,20 +237,44 @@ class WatchCommands(commands.Cog):
             )
             return
 
-        watch = await self.bot.db.add_watch(
-            guild_id=interaction.guild_id or 0,
-            channel_id=target.id,
-            creator_id=interaction.user.id,
-            name=(name or _default_name(query, query.host)).strip()[:80],
-            query=query,
-            source_url=query.web_url(),
-            interval=poll_interval,
-        )
-        self.bot.monitor.start(watch)
+        basis = (name or _default_name(query, query.host)).strip()[:80]
+        queries = bulk.expand(query, extra)
+        angelegt: list[Watch] = []
+        for einzeln in queries:
+            watch = await self.bot.db.add_watch(
+                guild_id=interaction.guild_id or 0,
+                channel_id=target.id,
+                creator_id=interaction.user.id,
+                name=(f"{basis} {einzeln.domain.flag}" if len(queries) > 1 else basis)[:80],
+                query=einzeln,
+                source_url=einzeln.web_url(),
+                interval=poll_interval,
+            )
+            self.bot.monitor.start(watch)
+            angelegt.append(watch)
 
-        await interaction.followup.send(
-            embed=embeds.watch_created_embed(watch, len(items))
+        if len(angelegt) == 1:
+            await interaction.followup.send(
+                embed=embeds.watch_created_embed(angelegt[0], len(items))
+            )
+            return
+
+        zeilen = "\n".join(
+            f"• #{w.id} · {w.name}" for w in angelegt
         )
+        embed = discord.Embed(
+            title=f"{len(angelegt)} Suchen angelegt",
+            description=(
+                f"{zeilen}\n\nJedes Land bekommt einen eigenen Bestand — derselbe "
+                "Artikel in zwei Ländern meldet also zweimal, und ein Fund in "
+                "Italien verschluckt den in Frankreich nicht."
+            ),
+            color=embeds.OK_GREEN,
+        )
+        hinweis = bulk.currency_warning(query, extra)
+        if hinweis:
+            embed.add_field(name="Währung", value=hinweis, inline=False)
+        await interaction.followup.send(embed=embed)
 
     # -------------------------------------------------------------------- list
 
@@ -323,12 +371,14 @@ class WatchCommands(commands.Cog):
     @app_commands.describe(
         channel="Channel für die Alerts (Standard: hier)",
         interval="Prüfintervall in Sekunden für alle (optional)",
+        laender="Zusätzliche Länder für jede Zeile, z. B. fr, nl, it",
     )
     async def bulk_add(
         self,
         interaction: discord.Interaction,
         channel: discord.TextChannel | None = None,
         interval: int | None = None,
+        laender: str | None = None,
     ) -> None:
         target = channel or interaction.channel
         if not isinstance(target, discord.TextChannel):
@@ -337,12 +387,21 @@ class WatchCommands(commands.Cog):
             )
             return
 
+        extra, unbekannt = domains.parse_list(laender or "")
+        if unbekannt:
+            await interaction.response.send_message(
+                f"❌ Unbekannte Länder: {', '.join(unbekannt)}. "
+                "Erlaubt sind Kürzel wie `fr`, `nl`, `it` oder `uk`.",
+                ephemeral=True,
+            )
+            return
+
         settings = self.bot.settings
         poll_interval = max(settings.min_interval, interval or settings.default_interval)
         # Das Modal muss die erste Antwort auf die Interaktion sein — vorher darf
         # nichts gesendet oder deferred werden.
         await interaction.response.send_modal(
-            BulkImportModal(self.bot, target, poll_interval)
+            BulkImportModal(self.bot, target, poll_interval, extra)
         )
 
     # ------------------------------------------------------------------ import
@@ -473,9 +532,17 @@ class ChannelCommands(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.describe(
-        anzahl="Wie viele der letzten Nachrichten (Standard 100, höchstens 1000)"
+        anzahl="Wie viele der letzten Nachrichten (Standard 100)",
+        alles="Alles löschen, was der Bot erreicht — ignoriert die Anzahl",
+        aelter_als="Nur löschen, was älter ist als … Stunden",
     )
-    async def clear(self, interaction: discord.Interaction, anzahl: int = 100) -> None:
+    async def clear(
+        self,
+        interaction: discord.Interaction,
+        anzahl: int = 100,
+        alles: bool = False,
+        aelter_als: int | None = None,
+    ) -> None:
         channel = interaction.channel
         if not isinstance(channel, discord.TextChannel):
             await interaction.response.send_message(
@@ -483,29 +550,35 @@ class ChannelCommands(commands.Cog):
             )
             return
 
-        if anzahl < 1:
+        if not alles and anzahl < 1:
             await interaction.response.send_message(
                 "Die Anzahl muss mindestens 1 sein.", ephemeral=True
             )
             return
-        # Obergrenze, damit ein Vertipper nicht minutenlang löscht: Discord
-        # erlaubt pro Aufruf nur 100 auf einmal, der Rest läuft in Schleifen.
-        anzahl = min(anzahl, 1000)
 
         me = interaction.guild.me if interaction.guild else None
-        if me is not None and not channel.permissions_for(me).manage_messages:
+        if not cleanup.may_purge(channel, me):
             await interaction.response.send_message(
-                "Mir fehlt in diesem Channel das Recht **Nachrichten verwalten**. "
-                "Ohne das darf ich nichts löschen.",
+                "Mir fehlen in diesem Channel die Rechte **Nachrichten verwalten** "
+                "und **Nachrichtenverlauf anzeigen**. Ohne die darf ich nichts löschen.",
                 ephemeral=True,
             )
             return
+
+        limit = cleanup.MAX_PER_RUN if alles else min(anzahl, cleanup.MAX_PER_RUN)
 
         # Ephemeral, damit die Bestätigung nicht selbst im aufgeräumten Channel
         # stehen bleibt.
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
-            geloescht = await channel.purge(limit=anzahl)
+            if aelter_als and aelter_als > 0:
+                geloescht = await cleanup.purge_older_than(
+                    channel, hours=aelter_als, limit=limit
+                )
+                womit = f"älter als {aelter_als} h"
+            else:
+                geloescht = await cleanup.purge(channel, limit=limit)
+                womit = "alles" if alles else f"die letzten {anzahl}"
         except discord.HTTPException as exc:
             await interaction.followup.send(
                 f"Löschen fehlgeschlagen: {exc}", ephemeral=True
@@ -513,16 +586,20 @@ class ChannelCommands(commands.Cog):
             return
 
         hinweis = ""
-        if len(geloescht) < anzahl:
+        if geloescht >= cleanup.MAX_PER_RUN:
             hinweis = (
-                "\n\nWeniger als angefordert — entweder war der Channel schon "
-                "leerer, oder die restlichen Nachrichten sind älter als 14 Tage. "
-                "Die lässt Discord nur einzeln löschen, was sehr lange dauert. "
-                "Schneller ist dann: Rechtsklick auf den Channel → **Kanal "
+                f"\n\nDas war der Deckel von {cleanup.MAX_PER_RUN} pro Aufruf. "
+                "Ruf den Befehl noch einmal auf, wenn noch etwas übrig ist."
+            )
+        elif alles and geloescht == 0:
+            hinweis = (
+                "\n\nNichts gelöscht. Meist heißt das: alles ist älter als 14 Tage. "
+                "So alte Nachrichten lässt Discord nur einzeln löschen, was ewig "
+                "dauert. Schneller ist dann Rechtsklick auf den Channel → **Kanal "
                 "duplizieren**, danach den alten löschen."
             )
         await interaction.followup.send(
-            f"🧹 {len(geloescht)} Nachricht(en) gelöscht.{hinweis}", ephemeral=True
+            f"🧹 {geloescht} Nachricht(en) gelöscht ({womit}).{hinweis}", ephemeral=True
         )
 
 

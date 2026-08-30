@@ -191,8 +191,8 @@ Panel auslösen, während du angemeldet bist.
 
 | Befehl | Wirkung |
 | --- | --- |
-| `/watch add url: [name] [channel] [interval]` | Suche anlegen. Testet die URL sofort live und meldet, wenn etwas nicht passt. |
-| `/watch bulk [channel] [interval]` | Öffnet ein Eingabefeld für viele Such-URLs auf einmal — eine je Zeile. |
+| `/watch add url: [name] [channel] [interval] [laender]` | Suche anlegen. Testet die URL sofort live und meldet, wenn etwas nicht passt. `laender: fr, nl, it` legt sie zusätzlich dort an. |
+| `/watch bulk [channel] [interval] [laender]` | Öffnet ein Eingabefeld für viele Such-URLs auf einmal — eine je Zeile. |
 | `/watch test url:` | Such-URL ausprobieren, ohne etwas anzulegen — zeigt die 3 neuesten Treffer als Vorschau (nur für dich sichtbar). |
 | `/watch list` | Alle Suchen des Servers mit Status, Intervall, Trefferzahl. |
 | `/watch pause id:` / `/watch resume id:` | Suche anhalten bzw. fortsetzen. |
@@ -237,6 +237,31 @@ Anders als beim einzelnen Hinzufügen wird dabei **nicht** jede Adresse sofort
 live geprüft: bei fünfzig Zeilen wären das fünfzig Abfragen auf einen Schlag,
 und genau dafür sperrt Vinted zuverlässig. Taugt eine Suche nicht, steht sie
 nach dem ersten Durchlauf mit Fehler in der Übersicht.
+
+### Dieselbe Suche in mehreren Ländern
+
+Derselbe Artikel kostet in Frankreich oder Italien oft deutlich weniger als in
+Deutschland — wer nur `.de` beobachtet, sieht ihn nie. Beide Formulare und
+beide Slash-Commands nehmen deshalb zusätzliche Länder entgegen: im Panel als
+Ankreuzfelder, in Discord als `laender: fr, nl, it`.
+
+Aus einer Adresse werden dann mehrere Suchen — eine je Land, mit denselben
+Filtern. Erkannt werden alle 22 Vinted-Länder, in jeder Schreibweise: `fr`,
+`.fr`, `vinted.fr`, `www.vinted.fr`; `uk` steht für `co.uk`. Was nicht
+zuzuordnen ist, wird gemeldet statt stillschweigend zu einer erfundenen Domain
+zu werden.
+
+Zwei Dinge, die dabei wichtig sind:
+
+- **Jedes Land bekommt einen eigenen Bestand.** Sonst würde ein Fund in Italien
+  den identischen Fund in Frankreich verschlucken. Derselbe Artikel in zwei
+  Ländern meldet also zweimal — das ist Absicht.
+- **Preisfilter hängen an der Währung.** Kategorie-, Marken- und Größen-IDs
+  sind bei Vinted länderübergreifend dieselben, die Währung nicht. Geht eine
+  Suche mit Preisgrenze nach Polen oder Großbritannien, wird die ursprüngliche
+  Währung ausdrücklich mitgegeben, damit aus „bis 40 EUR" nicht klammheimlich
+  „bis 40 PLN" wird — und du bekommst einen Hinweis dazu. Bei den EUR-Ländern
+  (fr, nl, it, es, be, at …) stellt sich die Frage nicht.
 
 Der Parser übernimmt `search_text`, `catalog_ids`, `brand_ids`, `size_ids`,
 `status_ids`, `color_ids`, `material_ids`, `price_from`, `price_to` und
@@ -369,6 +394,8 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `PANEL_PASSWORD` | — | Passwort fürs Web-Panel. Leer = Panel bleibt aus. |
 | `PANEL_DOMAIN` | — | Domain fürs Panel. Nur für den mitgelieferten Caddy (`--profile standalone`); ein vorhandener Reverse-Proxy kennt seine Domain selbst. |
 | `PANEL_PORT` | `8080` | Port auf `127.0.0.1` des Hosts. Nur bei Konflikten ändern. |
+| `ALERT_RETENTION_HOURS` | `0` | Alerts, die älter sind, werden automatisch gelöscht. `0` = aus. |
+| `CLEANUP_CHANNELS` | — | Channel-IDs zum Aufräumen. Leer = die Channels, in die der Bot selbst alertet. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
 | `MIN_INTERVAL` | `20` | Untergrenze, die `/watch interval` nicht unterschreitet. |
 | `PER_PAGE` | `20` | Artikel pro Abfrage. |

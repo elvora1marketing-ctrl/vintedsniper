@@ -88,3 +88,49 @@ def is_vinted_host(host: str) -> bool:
 
 def known_hosts() -> list[str]:
     return [d.host for d in _DOMAINS]
+
+
+# Kürzel, die niemand als TLD tippt, aber jeder als Land meint.
+_ALIASES = {
+    "uk": "www.vinted.co.uk",
+    "gb": "www.vinted.co.uk",
+    "en": "www.vinted.co.uk",
+    "us": "www.vinted.com",
+    "com": "www.vinted.com",
+}
+
+
+def resolve(text: str) -> Domain | None:
+    """Ein Länderkürzel oder eine Domain zu einem bekannten Ziel auflösen.
+
+    Nimmt `fr`, `.fr`, `vinted.fr`, `www.vinted.fr` und `uk` gleichermaßen.
+    Gibt `None` zurück, wenn nichts Bekanntes gemeint sein kann — Tippfehler
+    sollen nicht stillschweigend zu einer erfundenen Domain führen.
+    """
+    roh = text.strip().lower().lstrip(".")
+    if not roh:
+        return None
+    if roh in _ALIASES:
+        return _BY_HOST[_ALIASES[roh]]
+    if "vinted." in roh:
+        return _BY_HOST.get(normalize_host(roh))
+    return _BY_HOST.get(f"www.vinted.{roh}")
+
+
+def parse_list(text: str) -> tuple[list[Domain], list[str]]:
+    """Eine Aufzählung wie `fr, nl, it` einlesen.
+
+    Liefert die erkannten Domains (ohne Dubletten, in Eingabereihenfolge) und
+    die Angaben, mit denen nichts anzufangen war.
+    """
+    gefunden: list[Domain] = []
+    unbekannt: list[str] = []
+    for teil in text.replace(";", ",").replace(" ", ",").split(","):
+        if not teil.strip():
+            continue
+        domain = resolve(teil)
+        if domain is None:
+            unbekannt.append(teil.strip())
+        elif domain not in gefunden:
+            gefunden.append(domain)
+    return gefunden, unbekannt

@@ -46,6 +46,18 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _ids(name: str) -> tuple[int, ...]:
+    """Komma- oder leerzeichengetrennte Discord-IDs einlesen."""
+    raw = os.getenv(name, "")
+    werte: list[int] = []
+    for teil in raw.replace(",", " ").split():
+        if teil.isdigit():
+            werte.append(int(teil))
+        else:
+            log.warning("%s: %r ist keine Discord-ID, wird übersprungen.", name, teil)
+    return tuple(werte)
+
+
 class Mode(str, Enum):
     """Wie der Sniper betrieben wird.
 
@@ -77,6 +89,14 @@ class Settings:
     panel_password: str
     panel_host: str
     panel_port: int
+
+    # --- Aufräumen ---
+    # Alerts älter als das werden automatisch gelöscht. 0 = aus.
+    alert_retention_hours: int
+    # Channels, in denen aufgeräumt wird. Leer = alle Channels, in die der Bot
+    # selbst alertet. Für den Webhook-Modus muss die ID hier stehen: aus einer
+    # Webhook-URL lässt sich der Channel nicht ableiten.
+    cleanup_channel_ids: tuple[int, ...]
 
     # --- Speicher ---
     db_path: Path
@@ -137,6 +157,8 @@ class Settings:
             panel_password=os.getenv("PANEL_PASSWORD", "").strip(),
             panel_host=os.getenv("PANEL_HOST", "0.0.0.0").strip() or "0.0.0.0",
             panel_port=_int("PANEL_PORT", 8080),
+            alert_retention_hours=max(0, _int("ALERT_RETENTION_HOURS", 0)),
+            cleanup_channel_ids=_ids("CLEANUP_CHANNELS"),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),
             default_interval=default_interval,
             min_interval=min_interval,

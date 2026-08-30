@@ -17,6 +17,7 @@ from aiohttp import web
 from .. import bulk
 from ..db import Database
 from ..monitor import Monitor
+from ..vinted import domains
 from ..vinted.client import VintedClient
 from ..vinted.session import VintedError
 from ..vinted.urls import InvalidSearchURL, parse_search_url
@@ -190,6 +191,34 @@ class PanelServer:
             return web.HTTPFound(f"/?err={quote(err)}")
         return web.HTTPFound("/")
 
+    def _extra_domains(self, form: Any) -> tuple[list[Any], list[str]]:
+        """Weitere Länder aus dem Formular lesen.
+
+        Kommt sowohl mit Ankreuzfeldern (mehrfach `laender`) als auch mit einem
+        getippten `fr, nl, it` zurecht.
+        """
+        werte = form.getall("laender") if hasattr(form, "getall") else []
+        text = ",".join(str(w) for w in werte) or str(form.get("laender", ""))
+        return domains.parse_list(text)
+
+    async def _anlegen(
+        self, query: Any, *, name: str, interval: int
+    ) -> Any:
+        """Eine Suche speichern und sofort starten."""
+        watch = await self.db.add_watch(
+            guild_id=0,
+            channel_id=0,
+            creator_id=0,
+            name=name[:80],
+            query=query,
+            source_url=query.web_url(),
+            interval=interval,
+            webhook_url=self.alert_webhook_url,
+            origin="panel",
+        )
+        self.monitor.start(watch)
+        return watch
+
     async def add_watch(self, request: web.Request) -> web.StreamResponse:
         form = await request.post()
         raw_url = str(form.get("url", "")).strip()
@@ -213,28 +242,45 @@ class PanelServer:
         if interval_raw.isdigit():
             interval = max(self.min_interval, int(interval_raw))
 
+        extra, unbekannt = self._extra_domains(form)
+        if unbekannt:
+            raise self._back(
+                err=f"Unbekannte Länder: {', '.join(unbekannt)}. "
+                "Erlaubt sind Kürzel wie fr, nl, it oder uk."
+            )
+
         # Einmal live abfragen: so merkt man sofort, ob die URL taugt, statt es
-        # erst beim ersten stillen Durchlauf zu erfahren.
+        # erst beim ersten stillen Durchlauf zu erfahren. Geprüft wird nur die
+        # Ausgangsdomain — die gespiegelten benutzen dieselben Filter.
         try:
             items = await self.client.search(query)
         except VintedError as exc:
             raise self._back(err=f"Testabfrage fehlgeschlagen: {exc}") from exc
 
-        watch = await self.db.add_watch(
-            guild_id=0,
-            channel_id=0,
-            creator_id=0,
-            name=name or query.scalars.get("search_text") or query.host,
-            query=query,
-            source_url=query.web_url(),
-            interval=interval,
-            webhook_url=self.alert_webhook_url,
-            origin="panel",
-        )
-        self.monitor.start(watch)
-        raise self._back(
-            ok=f"Suche #{watch.id} angelegt, {len(items)} Artikel als Ausgangsbestand."
-        )
+        basis = name or query.scalars.get("search_text") or query.host
+        queries = bulk.expand(query, extra)
+        angelegt = []
+        for einzeln in queries:
+            beschriftung = (
+                f"{basis} {einzeln.domain.flag}" if len(queries) > 1 else basis
+            )
+            angelegt.append(
+                await self._anlegen(einzeln, name=beschriftung, interval=interval)
+            )
+
+        if len(angelegt) == 1:
+            meldung = (
+                f"Suche #{angelegt[0].id} angelegt, "
+                f"{len(items)} Artikel als Ausgangsbestand."
+            )
+        else:
+            laender = " ".join(q.domain.flag for q in queries)
+            meldung = (
+                f"{len(angelegt)} Suchen angelegt — {laender}. "
+                f"{len(items)} Artikel als Ausgangsbestand auf {query.host}."
+            )
+        hinweis = bulk.currency_warning(query, extra)
+        raise self._back(ok=f"{meldung} {hinweis}".strip())
 
     async def import_watches(self, request: web.Request) -> web.StreamResponse:
         """Mehrere Such-URLs auf einmal übernehmen, eine je Zeile."""
@@ -260,28 +306,35 @@ class PanelServer:
         # fünfzig Adressen wären das fünfzig Abfragen auf einen Schlag — ein
         # zuverlässiger Weg, sich von Vinted sperren zu lassen. Taugt eine Suche
         # nicht, zeigt die Übersicht sie nach dem ersten Durchlauf als Fehler.
+        extra, unbekannt = self._extra_domains(form)
+        if unbekannt:
+            raise self._back(
+                err=f"Unbekannte Länder: {', '.join(unbekannt)}. "
+                "Erlaubt sind Kürzel wie fr, nl, it oder uk."
+            )
+
         vorhanden = {w.source_url for w in await self.db.list_watches()}
         angelegt = 0
         bekannt = 0
 
         for entry in plan.entries:
-            if entry.url in vorhanden:
-                bekannt += 1
-                continue
-            watch = await self.db.add_watch(
-                guild_id=0,
-                channel_id=0,
-                creator_id=0,
-                name=entry.name,
-                query=entry.query,
-                source_url=entry.url,
-                interval=interval,
-                webhook_url=self.alert_webhook_url,
-                origin="panel",
-            )
-            vorhanden.add(entry.url)
-            self.monitor.start(watch)
-            angelegt += 1
+            queries = bulk.expand(entry.query, extra)
+            for einzeln in queries:
+                url = einzeln.web_url()
+                if url in vorhanden:
+                    bekannt += 1
+                    continue
+                vorhanden.add(url)
+                await self._anlegen(
+                    einzeln,
+                    name=(
+                        f"{entry.name} {einzeln.domain.flag}"
+                        if len(queries) > 1
+                        else entry.name
+                    ),
+                    interval=interval,
+                )
+                angelegt += 1
 
         meldung = bulk.summarize(plan, angelegt=angelegt, bekannt=bekannt)
         if plan.problems:
