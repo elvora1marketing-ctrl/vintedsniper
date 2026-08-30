@@ -12,7 +12,7 @@ from ..db import Watch, serialize_query
 from ..vinted import domains
 from ..vinted.session import VintedError
 from ..vinted.urls import InvalidSearchURL, SearchQuery, parse_search_url
-from .. import embeds
+from .. import bulk, embeds
 
 if TYPE_CHECKING:
     from .bot import SniperBot
@@ -41,6 +41,92 @@ async def watch_id_autocomplete(
         if len(choices) == 25:
             break
     return choices
+
+
+class BulkImportModal(discord.ui.Modal, title="Suchen importieren"):
+    """Eingabefeld für viele Such-URLs auf einmal.
+
+    Ein Modal statt eines Befehlsparameters: Discord-Optionen sind einzeilig,
+    hier braucht es aber ein Feld, in das sich eine ganze Liste einfügen lässt.
+    """
+
+    urls: discord.ui.TextInput = discord.ui.TextInput(
+        label="Such-URLs — eine je Zeile",
+        style=discord.TextStyle.paragraph,
+        placeholder=(
+            "https://www.vinted.de/catalog?search_text=nike+air+max\n"
+            "Carhartt bis 40 | https://www.vinted.de/catalog?search_text=carhartt"
+        ),
+        max_length=4000,
+        required=True,
+    )
+
+    def __init__(
+        self, bot: "SniperBot", channel: discord.TextChannel, interval: int
+    ) -> None:
+        super().__init__()
+        self.bot = bot
+        self.channel = channel
+        self.interval = interval
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        plan = bulk.parse_import(str(self.urls))
+        if not plan.entries and not plan.problems:
+            await interaction.response.send_message(
+                "Da war keine Adresse dabei.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        # Bewusst ohne Testabfrage je Adresse: bei fünfzig Zeilen wären das
+        # fünfzig Abfragen auf einen Schlag, und Vinted sperrt dafür zuverlässig.
+        # Eine untaugliche Suche fällt nach dem ersten Durchlauf in `/watch list`
+        # als Fehler auf.
+        vorhanden = {
+            w.source_url for w in await self.bot.db.list_watches(interaction.guild_id or 0)
+        }
+        angelegt: list[Watch] = []
+        bekannt = 0
+
+        for entry in plan.entries:
+            if entry.url in vorhanden:
+                bekannt += 1
+                continue
+            watch = await self.bot.db.add_watch(
+                guild_id=interaction.guild_id or 0,
+                channel_id=self.channel.id,
+                creator_id=interaction.user.id,
+                name=entry.name,
+                query=entry.query,
+                source_url=entry.url,
+                interval=self.interval,
+            )
+            vorhanden.add(entry.url)
+            self.bot.monitor.start(watch)
+            angelegt.append(watch)
+
+        beschreibung = "\n".join(f"• #{w.id} · {w.name}" for w in angelegt[:15])
+        if len(angelegt) > 15:
+            beschreibung += f"\n• … und {len(angelegt) - 15} weitere"
+        if not angelegt:
+            beschreibung = "_Nichts Neues dabei._"
+
+        embed = discord.Embed(
+            title=bulk.summarize(plan, angelegt=len(angelegt), bekannt=bekannt),
+            description=(
+                f"{beschreibung}\n\nAlerts gehen nach {self.channel.mention}, "
+                f"geprüft wird alle {self.interval}s."
+            ),
+            color=embeds.OK_GREEN if angelegt else embeds.WARN_ORANGE,
+        )
+        if plan.problems:
+            fehler = "\n".join(p.describe() for p in plan.problems[:5])
+            if len(plan.problems) > 5:
+                fehler += f"\n… und {len(plan.problems) - 5} weitere"
+            embed.add_field(name="Nicht verwendbar", value=fehler[:1024], inline=False)
+
+        await interaction.followup.send(embed=embed)
 
 
 class WatchCommands(commands.Cog):
@@ -228,6 +314,37 @@ class WatchCommands(commands.Cog):
             f"⏱️ Suche #{watch_id} prüft jetzt alle {seconds}s."
         )
 
+    # -------------------------------------------------------------------- bulk
+
+    @group.command(
+        name="bulk",
+        description="Viele Such-URLs auf einmal anlegen — eine je Zeile",
+    )
+    @app_commands.describe(
+        channel="Channel für die Alerts (Standard: hier)",
+        interval="Prüfintervall in Sekunden für alle (optional)",
+    )
+    async def bulk_add(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None,
+        interval: int | None = None,
+    ) -> None:
+        target = channel or interaction.channel
+        if not isinstance(target, discord.TextChannel):
+            await interaction.response.send_message(
+                "Bitte einen normalen Text-Channel angeben.", ephemeral=True
+            )
+            return
+
+        settings = self.bot.settings
+        poll_interval = max(settings.min_interval, interval or settings.default_interval)
+        # Das Modal muss die erste Antwort auf die Interaktion sein — vorher darf
+        # nichts gesendet oder deferred werden.
+        await interaction.response.send_modal(
+            BulkImportModal(self.bot, target, poll_interval)
+        )
+
     # ------------------------------------------------------------------ import
 
     @group.command(
@@ -341,6 +458,71 @@ class WatchCommands(commands.Cog):
             ),
             embeds=[embeds.item_embed(item, preview) for item in items[:3]],
             ephemeral=True,
+        )
+
+
+class ChannelCommands(commands.Cog):
+    """Aufräumen im Alert-Channel."""
+
+    def __init__(self, bot: "SniperBot") -> None:
+        self.bot = bot
+
+    @app_commands.command(
+        name="clear", description="Nachrichten in diesem Channel löschen"
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_messages=True)
+    @app_commands.describe(
+        anzahl="Wie viele der letzten Nachrichten (Standard 100, höchstens 1000)"
+    )
+    async def clear(self, interaction: discord.Interaction, anzahl: int = 100) -> None:
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Das geht nur in einem normalen Text-Channel.", ephemeral=True
+            )
+            return
+
+        if anzahl < 1:
+            await interaction.response.send_message(
+                "Die Anzahl muss mindestens 1 sein.", ephemeral=True
+            )
+            return
+        # Obergrenze, damit ein Vertipper nicht minutenlang löscht: Discord
+        # erlaubt pro Aufruf nur 100 auf einmal, der Rest läuft in Schleifen.
+        anzahl = min(anzahl, 1000)
+
+        me = interaction.guild.me if interaction.guild else None
+        if me is not None and not channel.permissions_for(me).manage_messages:
+            await interaction.response.send_message(
+                "Mir fehlt in diesem Channel das Recht **Nachrichten verwalten**. "
+                "Ohne das darf ich nichts löschen.",
+                ephemeral=True,
+            )
+            return
+
+        # Ephemeral, damit die Bestätigung nicht selbst im aufgeräumten Channel
+        # stehen bleibt.
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            geloescht = await channel.purge(limit=anzahl)
+        except discord.HTTPException as exc:
+            await interaction.followup.send(
+                f"Löschen fehlgeschlagen: {exc}", ephemeral=True
+            )
+            return
+
+        hinweis = ""
+        if len(geloescht) < anzahl:
+            hinweis = (
+                "\n\nWeniger als angefordert — entweder war der Channel schon "
+                "leerer, oder die restlichen Nachrichten sind älter als 14 Tage. "
+                "Die lässt Discord nur einzeln löschen, was sehr lange dauert. "
+                "Schneller ist dann: Rechtsklick auf den Channel → **Kanal "
+                "duplizieren**, danach den alten löschen."
+            )
+        await interaction.followup.send(
+            f"🧹 {len(geloescht)} Nachricht(en) gelöscht.{hinweis}", ephemeral=True
         )
 
 

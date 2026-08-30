@@ -74,10 +74,11 @@ class SniperBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.db.connect()
 
-        from .commands import StatusCommand, WatchCommands
+        from .commands import ChannelCommands, StatusCommand, WatchCommands
 
         await self.add_cog(WatchCommands(self))
         await self.add_cog(StatusCommand(self))
+        await self.add_cog(ChannelCommands(self))
 
         if self.settings.guild_id:
             guild = discord.Object(id=self.settings.guild_id)

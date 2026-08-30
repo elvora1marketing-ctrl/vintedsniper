@@ -192,6 +192,7 @@ Panel auslösen, während du angemeldet bist.
 | Befehl | Wirkung |
 | --- | --- |
 | `/watch add url: [name] [channel] [interval]` | Suche anlegen. Testet die URL sofort live und meldet, wenn etwas nicht passt. |
+| `/watch bulk [channel] [interval]` | Öffnet ein Eingabefeld für viele Such-URLs auf einmal — eine je Zeile. |
 | `/watch test url:` | Such-URL ausprobieren, ohne etwas anzulegen — zeigt die 3 neuesten Treffer als Vorschau (nur für dich sichtbar). |
 | `/watch list` | Alle Suchen des Servers mit Status, Intervall, Trefferzahl. |
 | `/watch pause id:` / `/watch resume id:` | Suche anhalten bzw. fortsetzen. |
@@ -199,6 +200,7 @@ Panel auslösen, während du angemeldet bist.
 | `/watch remove id:` | Suche löschen. |
 | `/watch import [channel]` | Suchen aus `searches.toml` übernehmen — sie melden danach über den Bot und lassen sich per Command verwalten. Trefferhistorie bleibt erhalten. |
 | `/status` | Zustand von Bot und Vinted-Sessions. |
+| `/clear [anzahl]` | Räumt den Channel auf (Standard 100 Nachrichten, höchstens 1000). Braucht **Nachrichten verwalten**. |
 
 Bei allen `id`-Optionen schlägt Discord die vorhandenen Suchen per Autocomplete
 vor. Die `/watch`-Befehle setzen die Berechtigung **Server verwalten** voraus —
@@ -212,6 +214,29 @@ anpassen.
 2. Wenn die Ergebnisliste passt: komplette Adresszeile kopieren.
 3. Einfügen — im Bot-Modus als `/watch add url:<einfügen>`, im Webhook-Modus
    als `url = "<einfügen>"` in `searches.toml`.
+
+### Viele Suchen auf einmal
+
+Für mehr als eine Handvoll lohnt der Sammel-Import: im Panel unter **Mehrere auf
+einmal**, in Discord über `/watch bulk`. Beide erwarten dasselbe Format — eine
+Adresse je Zeile:
+
+```
+https://www.vinted.de/catalog?search_text=nike+air+max
+https://www.vinted.de/catalog?search_text=carhartt&price_to=40
+
+# Zeilen mit Raute werden übersprungen
+Stone Island FR | https://www.vinted.fr/catalog?search_text=stone+island
+```
+
+Ein Name lässt sich mit `Name | Adresse` voranstellen; ohne wird der Suchbegriff
+genommen. Leerzeilen, doppelte Adressen und bereits angelegte Suchen werden
+übersprungen, kaputte Zeilen einzeln gemeldet — der Rest läuft trotzdem durch.
+
+Anders als beim einzelnen Hinzufügen wird dabei **nicht** jede Adresse sofort
+live geprüft: bei fünfzig Zeilen wären das fünfzig Abfragen auf einen Schlag,
+und genau dafür sperrt Vinted zuverlässig. Taugt eine Suche nicht, steht sie
+nach dem ersten Durchlauf mit Fehler in der Übersicht.
 
 Der Parser übernimmt `search_text`, `catalog_ids`, `brand_ids`, `size_ids`,
 `status_ids`, `color_ids`, `material_ids`, `price_from`, `price_to` und

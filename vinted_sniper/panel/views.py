@@ -42,11 +42,17 @@ h2 { font-size: 15px; margin: 28px 0 10px; color: var(--muted);
         border-radius: 10px; padding: 16px; margin-bottom: 12px; }
 .row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .grow { flex: 1 1 320px; min-width: 0; }
-input, select, button {
+input, select, button, textarea {
   font: inherit; padding: 9px 11px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--card); color: var(--text);
 }
-input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo,
+           monospace; font-size: 13px; line-height: 1.5; }
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+code { font-size: 12.5px; background: var(--bg); border: 1px solid var(--line);
+       border-radius: 4px; padding: 1px 5px; }
 button { cursor: pointer; border-color: transparent; background: var(--accent);
          color: #fff; font-weight: 600; }
 button.ghost { background: transparent; border-color: var(--line);
@@ -228,6 +234,25 @@ def dashboard(
           <div class=meta style="margin-top:10px">
             Suche auf Vinted zusammenklicken, Adresszeile kopieren, hier einfügen.
             Alle Filter kommen automatisch mit.
+          </div>
+        </form>
+
+        <h2>Mehrere auf einmal</h2>
+        <form method=post action="/import" class=card>
+          <div class=row>
+            <textarea class=grow name=urls rows=7 required
+                      aria-label="Such-URLs, eine je Zeile"
+                      placeholder="https://www.vinted.de/catalog?search_text=nike+air+max&#10;https://www.vinted.de/catalog?search_text=carhartt&amp;price_to=40&#10;Stone Island | https://www.vinted.fr/catalog?search_text=stone+island"></textarea>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <input type=number name=interval placeholder="Sekunden" min=20 step=10
+                   aria-label="Intervall in Sekunden">
+            <button type=submit>Alle importieren</button>
+          </div>
+          <div class=meta style="margin-top:10px">
+            Eine Adresse je Zeile. Leerzeilen und Zeilen mit <code>#</code> werden
+            übersprungen, bereits vorhandene Suchen ebenso. Ein Name lässt sich
+            mit <code>Name | Adresse</code> voranstellen.
           </div>
         </form>
 

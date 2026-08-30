@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from aiohttp import web
 
+from .. import bulk
 from ..db import Database
 from ..monitor import Monitor
 from ..vinted.client import VintedClient
@@ -67,6 +68,7 @@ class PanelServer:
                 web.post("/login", self.login),
                 web.post("/logout", self.logout),
                 web.post("/add", self.add_watch),
+                web.post("/import", self.import_watches),
                 web.post("/watch/{watch_id}/toggle", self.toggle_watch),
                 web.post("/watch/{watch_id}/delete", self.delete_watch),
                 web.post("/watch/{watch_id}/interval", self.set_interval),
@@ -233,6 +235,63 @@ class PanelServer:
         raise self._back(
             ok=f"Suche #{watch.id} angelegt, {len(items)} Artikel als Ausgangsbestand."
         )
+
+    async def import_watches(self, request: web.Request) -> web.StreamResponse:
+        """Mehrere Such-URLs auf einmal übernehmen, eine je Zeile."""
+        form = await request.post()
+        text = str(form.get("urls", ""))
+        interval_raw = str(form.get("interval", "")).strip()
+
+        if not self.alert_webhook_url:
+            raise self._back(
+                err="Es fehlt ein Alert-Ziel. Trage ALERT_WEBHOOK_URL in der "
+                ".env ein und starte neu, sonst kommen die Treffer nirgends an."
+            )
+
+        plan = bulk.parse_import(text)
+        if not plan.entries and not plan.problems:
+            raise self._back(err="Keine Adresse gefunden — das Feld war leer.")
+
+        interval = self.default_interval
+        if interval_raw.isdigit():
+            interval = max(self.min_interval, int(interval_raw))
+
+        # Anders als beim einzelnen Hinzufügen wird hier nicht live geprüft: bei
+        # fünfzig Adressen wären das fünfzig Abfragen auf einen Schlag — ein
+        # zuverlässiger Weg, sich von Vinted sperren zu lassen. Taugt eine Suche
+        # nicht, zeigt die Übersicht sie nach dem ersten Durchlauf als Fehler.
+        vorhanden = {w.source_url for w in await self.db.list_watches()}
+        angelegt = 0
+        bekannt = 0
+
+        for entry in plan.entries:
+            if entry.url in vorhanden:
+                bekannt += 1
+                continue
+            watch = await self.db.add_watch(
+                guild_id=0,
+                channel_id=0,
+                creator_id=0,
+                name=entry.name,
+                query=entry.query,
+                source_url=entry.url,
+                interval=interval,
+                webhook_url=self.alert_webhook_url,
+                origin="panel",
+            )
+            vorhanden.add(entry.url)
+            self.monitor.start(watch)
+            angelegt += 1
+
+        meldung = bulk.summarize(plan, angelegt=angelegt, bekannt=bekannt)
+        if plan.problems:
+            # Die ersten Fehlerzeilen mitgeben — pauschal „3 fehlerhaft“ lässt
+            # niemanden erkennen, welche Zeile gemeint ist.
+            zeilen = "; ".join(p.describe() for p in plan.problems[:3])
+            if len(plan.problems) > 3:
+                zeilen += f"; … und {len(plan.problems) - 3} weitere"
+            raise self._back(err=f"{meldung} {zeilen}")
+        raise self._back(ok=meldung)
 
     async def _watch_from(self, request: web.Request):
         try:
