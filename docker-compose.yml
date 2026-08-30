@@ -21,17 +21,23 @@ services:
       - ./proxies.txt:/app/proxies.txt:ro
     # Chromium braucht beim Fallback kurzzeitig spürbar Speicher.
     shm_size: 512mb
-    # Kein Port nach außen: an das Panel kommt man nur über Caddy, damit die
-    # Verbindung immer verschlüsselt ist.
-    expose:
-      - "8080"
+    # Nur an localhost gebunden: aus dem Internet ist das Panel so nicht
+    # direkt erreichbar, ein Reverse-Proxy auf demselben Rechner aber schon.
+    # Damit bleibt die Verbindung nach außen immer verschlüsselt.
+    ports:
+      - "127.0.0.1:${PANEL_PORT:-8080}:8080"
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
 
+  # Nur nötig, wenn auf dem Server noch kein Reverse-Proxy läuft. Starten mit:
+  #   docker compose --profile standalone up -d
+  # Läuft dort bereits Caddy, nginx oder Traefik, lass diesen Dienst aus und
+  # trage stattdessen dort einen Block für PANEL_DOMAIN ein (siehe README).
   caddy:
+    profiles: ["standalone"]
     image: caddy:2-alpine
     container_name: vinted-caddy
     restart: unless-stopped
@@ -39,7 +45,7 @@ services:
       - sniper
     environment:
       # Domain aus der .env — Caddy besorgt dafür automatisch ein Zertifikat.
-      PANEL_DOMAIN: ${PANEL_DOMAIN:?PANEL_DOMAIN fehlt in der .env}
+      PANEL_DOMAIN: ${PANEL_DOMAIN:-vinted.example.de}
     ports:
       - "80:80"
       - "443:443"
@@ -52,3 +58,10 @@ volumes:
   sniper-data:
   caddy-data:
   caddy-config:
+
+networks:
+  default:
+    # Fester Name, damit ein bereits laufender Reverse-Proxy diesem Netz
+    # beitreten und den Sniper unter `vinted-sniper:8080` erreichen kann:
+    #   docker network connect vinted-sniper-net <name-des-proxy-containers>
+    name: vinted-sniper-net

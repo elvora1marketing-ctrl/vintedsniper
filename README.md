@@ -141,9 +141,44 @@ PANEL_PASSWORD=ein-langes-passwort
 PANEL_DOMAIN=vinted.example.de
 ```
 
-… einen DNS-A-Eintrag für die Domain auf den Server zeigen lassen, dann
-`docker compose up -d --build`. Caddy besorgt das HTTPS-Zertifikat automatisch
-und erneuert es selbst; der Sniper selbst hat keinen offenen Port nach außen.
+… und einen DNS-A-Eintrag für die Domain auf den Server zeigen lassen. Wie es
+dann weitergeht, hängt davon ab, ob auf dem Server schon ein Reverse-Proxy die
+Ports 80 und 443 belegt (`docker ps` verrät es).
+
+**Fall A — der Server gehört dem Sniper allein.** Dann bringt der Stack seinen
+eigenen Caddy mit:
+
+```bash
+docker compose --profile standalone up -d --build
+```
+
+Caddy besorgt das HTTPS-Zertifikat automatisch und erneuert es selbst.
+
+**Fall B — es läuft schon ein Reverse-Proxy (Caddy, nginx, Traefik).** Zwei
+Webserver können sich Port 443 nicht teilen, ein zweiter Caddy käme also gar
+nicht erst hoch. Der Sniper-Stack bleibt trotzdem vollständig eigenständig —
+eigene Container, eigenes Netz, eigene Volumes, eigener Neustart-Zyklus. Nur
+die TLS-Terminierung übernimmt der vorhandene Proxy:
+
+```bash
+docker compose up -d --build        # ohne --profile, also ohne eigenen Caddy
+docker network connect vinted-sniper-net <name-des-proxy-containers>
+```
+
+Der Sniper ist danach unter `vinted-sniper:8080` im Netz `vinted-sniper-net`
+erreichbar. Im vorhandenen Caddyfile ein Block dafür, mehr nicht:
+
+```
+vinted.example.de {
+	reverse_proxy vinted-sniper:8080
+}
+```
+
+Zusätzlich lauscht der Sniper auf `127.0.0.1:8080` des Hosts — nützlich für
+einen Reverse-Proxy, der nicht in Docker läuft, und zum Testen mit
+`curl -I http://127.0.0.1:8080/health`. Von außen ist der Port nicht
+erreichbar, die Verbindung ins Internet läuft also immer über den Proxy und
+damit verschlüsselt.
 
 Ohne `PANEL_PASSWORD` startet das Panel gar nicht erst — sonst könnte jeder die
 Suchen ändern, der die Adresse kennt. Die Anmeldung läuft über ein Formular mit
@@ -307,8 +342,8 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `DISCORD_GUILD_ID` | — | Optional. Leer = Befehle werden auf allen Servern des Bots registriert. |
 | `SEARCHES_PATH` | `searches.toml` | Suchdefinitionen für den Webhook-Modus. |
 | `PANEL_PASSWORD` | — | Passwort fürs Web-Panel. Leer = Panel bleibt aus. |
-| `PANEL_DOMAIN` | — | Domain fürs Panel; Caddy holt dafür ein HTTPS-Zertifikat. |
-| `PANEL_PORT` | `8080` | Port im Container. Nur bei Konflikten ändern. |
+| `PANEL_DOMAIN` | — | Domain fürs Panel. Nur für den mitgelieferten Caddy (`--profile standalone`); ein vorhandener Reverse-Proxy kennt seine Domain selbst. |
+| `PANEL_PORT` | `8080` | Port auf `127.0.0.1` des Hosts. Nur bei Konflikten ändern. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
 | `MIN_INTERVAL` | `20` | Untergrenze, die `/watch interval` nicht unterschreitet. |
 | `PER_PAGE` | `20` | Artikel pro Abfrage. |
