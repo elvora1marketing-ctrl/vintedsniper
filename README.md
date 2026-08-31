@@ -197,6 +197,52 @@ Panel auslösen, während du angemeldet bist.
 
 ---
 
+## Proxy-Volumen im Blick behalten
+
+Beim Proxy zahlt man nach übertragenen Bytes, nicht nach Abfragen. Ist das
+Kontingent leer, liefern **alle** Proxys HTTP 402 — auch tausend Sitzungen
+ändern daran nichts, denn das Kontingent gilt fürs Konto. Der Sniper steht
+dann, ohne dass vorher etwas darauf hingedeutet hätte.
+
+Deshalb misst er mit. `/status` und das Panel zeigen:
+
+```
+heute 412,3 MB in 14 208 Abfragen (Ø 29,7 KB) · insgesamt 2,1 GB
+Hochgerechnet: 12,4 GB in 30 Tagen bei 35 Suchen alle 60s
+```
+
+Die Hochrechnung ist die Zahl, die vor dem Nachkaufen zählt. Gemessen wird der
+Rumpf der Antwort; Header und TLS kommen beim Anbieter obendrauf, die
+Abrechnung liegt also etwas darüber.
+
+**Die vier Stellschrauben**, absteigend nach Wirkung:
+
+| Maßnahme | Wirkung |
+| --- | --- |
+| Weniger Länder (`EXTRA_COUNTRIES`) | linear — von 7 auf 3 spart 57 % |
+| Längeres Intervall | linear — 60s → 120s halbiert |
+| `PER_PAGE=10` statt `20` | grob halbe Antwortgröße |
+| Suchen pausieren, die nichts liefern | siehe Trefferzahl im Panel |
+
+Ein Rechenbeispiel bei ~25 KB je Abfrage:
+
+| Konfiguration | pro Tag | pro Monat |
+| --- | --- | --- |
+| 35 Suchen, alle 60 s | 1,2 GB | 36 GB |
+| 35 Suchen, alle 120 s | 615 MB | 18 GB |
+| 15 Suchen, alle 60 s | 527 MB | 15 GB |
+| 15 Suchen, 120 s, `PER_PAGE=10` | 148 MB | 4,3 GB |
+
+Die 25 KB sind eine Schätzung — **verlass dich auf den gemessenen Wert in
+`/status`**, der steht nach einer Stunde Betrieb.
+
+Der Browser-Modus (Notnagel bei Sperren) lädt keine Bilder, Videos und
+Schriften mehr. Auf einer Vinted-Katalogseite sind das mehrere Megabyte je
+Aufruf; für die Katalogabfrage sind sie wertlos. Javascript bleibt an — daran
+hängt die Antibot-Prüfung.
+
+---
+
 ## Merken, wenn der Sniper ausfällt
 
 Ein Sniper, der still ausfällt, ist schlimmer als keiner: man verlässt sich auf

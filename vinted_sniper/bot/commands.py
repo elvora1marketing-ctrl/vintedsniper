@@ -632,5 +632,6 @@ class StatusCommand(commands.Cog):
                 running=running,
                 sessions=self.bot.client.pool.status(),
                 started_at=self.bot.started_at,
+                meter=self.bot.client.pool.meter,
             )
         )

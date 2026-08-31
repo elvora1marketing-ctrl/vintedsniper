@@ -176,6 +176,13 @@ class BrowserFetcher:
             )
             await self._context.add_init_script(_STEALTH_SCRIPT)
 
+            # Bilder, Videos und Schriften sind für die Katalogabfrage wertlos,
+            # machen aber den Großteil des Datenvolumens aus — auf einer
+            # Vinted-Katalogseite mehrere Megabyte. Beim Proxy zahlt man nach
+            # Volumen, nicht nach Abfragen. Javascript und die API-Aufrufe
+            # bleiben unangetastet: daran hängt die Antibot-Prüfung.
+            await self._context.route("**/*", self._nur_notwendiges)
+
             self._page = await self._context.new_page()
             response = await self._page.goto(
                 f"https://{self.host}/catalog",
@@ -205,6 +212,22 @@ class BrowserFetcher:
         url = f"https://{self.host}{path}?{urlencode(params)}"
         result = await self._page.evaluate(_FETCH_SCRIPT, url)
         return int(result.get("status", 0)), str(result.get("body", ""))
+
+    # Alles hiervon wird verworfen, bevor es über die Leitung geht.
+    BLOCKIERT = {"image", "media", "font"}
+
+    async def _nur_notwendiges(self, route, request) -> None:
+        """Schwere Nebensachen abbrechen, den Rest durchlassen."""
+        try:
+            if request.resource_type in self.BLOCKIERT:
+                await route.abort()
+            else:
+                await route.continue_()
+        except Exception:
+            # Eine abgebrochene Navigation macht die Route ungültig. Das ist
+            # kein Fehler, den man behandeln müsste — nur einer, der den
+            # Browser nicht mitreißen darf.
+            pass
 
     async def close(self) -> None:
         for attribute in ("_page", "_context", "_browser"):

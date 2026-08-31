@@ -34,6 +34,7 @@ from typing import Any
 
 from curl_cffi.requests import AsyncSession
 
+from .. import traffic
 from ..config import Settings
 from . import domains
 from .browser import BrowserFetcher, BrowserUnavailable
@@ -107,10 +108,15 @@ class VintedSession:
             min(len(self.settings.proxies) + 1, self.MAX_ATTEMPTS),
         )
 
-    def __init__(self, host: str, settings: Settings) -> None:
+    def __init__(
+        self, host: str, settings: Settings, meter: traffic.Meter | None = None
+    ) -> None:
         self.host = host
         self.domain = domains.lookup(host)
         self.settings = settings
+        # Gemeinsamer Zähler über alle Hosts: das Proxy-Kontingent ist auch
+        # gemeinsam, getrennte Zahlen wären zum Hochrechnen wertlos.
+        self.meter = meter if meter is not None else traffic.Meter()
 
         self._session: AsyncSession | None = None
         self._lock = asyncio.Lock()
@@ -247,6 +253,20 @@ class VintedSession:
             total,
         )
 
+    def _record(self, response: Any) -> None:
+        """Übertragene Bytes mitzählen.
+
+        `content` ist der Rumpf so, wie er ankommt; ist er nicht greifbar,
+        dient die Textlänge als Näherung. Ein Messfehler darf nie eine Abfrage
+        scheitern lassen — deshalb der breite except.
+        """
+        try:
+            rumpf = getattr(response, "content", None)
+            groesse = len(rumpf) if rumpf is not None else len(response.text or "")
+        except Exception:
+            return
+        self.meter.record(self.host, groesse)
+
     def _base_headers(self) -> dict[str, str]:
         # curl_cffi setzt bei aktiver Impersonation User-Agent und die
         # sec-ch-ua-*-Header selbst passend zum gewählten Browser. Wir ergänzen
@@ -286,6 +306,7 @@ class VintedSession:
             await session.close()
             raise VintedError(f"Verbindung zu {self.host} fehlgeschlagen: {exc}") from exc
 
+        self._record(response)
         body = response.text[:4000].lower()
         challenged = response.status_code in (403, 429) or any(
             marker in body for marker in _CHALLENGE_MARKERS
@@ -491,6 +512,7 @@ class VintedSession:
                     await self._backoff(attempt)
                     continue
 
+                self._record(response)
                 status = response.status_code
 
                 if status == 401:
@@ -576,12 +598,14 @@ class SessionPool:
         self.settings = settings
         self._sessions: dict[str, VintedSession] = {}
         self._lock = asyncio.Lock()
+        # Ein Zähler für alle Hosts — das Proxy-Kontingent ist ebenfalls eins.
+        self.meter = traffic.Meter()
 
     async def get(self, host: str) -> VintedSession:
         async with self._lock:
             session = self._sessions.get(host)
             if session is None:
-                session = VintedSession(host, self.settings)
+                session = VintedSession(host, self.settings, self.meter)
                 self._sessions[host] = session
             return session
 

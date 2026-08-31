@@ -6,7 +6,7 @@ import datetime as dt
 
 import discord
 
-from . import deals
+from . import deals, traffic
 from .db import Watch
 from .vinted import domains
 from .vinted.models import Item
@@ -199,6 +199,7 @@ def status_embed(
     running: set[int],
     sessions: dict[str, str],
     started_at: dt.datetime,
+    meter: traffic.Meter | None = None,
 ) -> discord.Embed:
     active = [w for w in watches if w.enabled]
     failing = [w for w in active if w.last_error]
@@ -223,6 +224,21 @@ def status_embed(
         value=discord.utils.format_dt(started_at, style="R"),
         inline=True,
     )
+    if meter is not None and meter.requests:
+        # Beim Proxy zahlt man nach Volumen. Die Hochrechnung ist die Zahl,
+        # die man vor dem Nachkaufen sehen will.
+        aktiv = [w for w in watches if w.enabled]
+        takt = (
+            sum(w.interval for w in aktiv) / len(aktiv) if aktiv else 0.0
+        )
+        prognose = meter.forecast(len(aktiv), takt)
+        text = meter.summary()
+        if prognose:
+            text += (
+                f"\n**Hochgerechnet: {traffic.human(prognose)} in 30 Tagen** "
+                f"bei {len(aktiv)} Suchen alle {takt:.0f}s"
+            )
+        embed.add_field(name="Proxy-Volumen", value=text, inline=False)
     if sessions:
         embed.add_field(
             name="Vinted-Sessions",

@@ -175,6 +175,7 @@ class PanelServer:
                 message=request.query.get("ok"),
                 error=request.query.get("err"),
                 default_countries=self.default_countries,
+                traffic_line=self.client.pool.meter.summary(),
             ),
             content_type="text/html",
             charset="utf-8",

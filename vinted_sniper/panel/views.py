@@ -550,6 +550,7 @@ def dashboard(
     message: str | None = None,
     error: str | None = None,
     default_countries: tuple[str, ...] = (),
+    traffic_line: str = "",
 ) -> str:
     flash = ""
     if error:
@@ -574,6 +575,14 @@ def dashboard(
     karten = "".join(_watch_card(w, w.id in running) for w in watches) or (
         "<div class=card><div class=meta>Noch keine Suche angelegt. Oben eine "
         "Vinted-Adresse einfügen — die Filter kommen automatisch mit.</div></div>"
+    )
+
+    volumen = (
+        f'<div class=meta style="margin-top:12px;padding-top:12px;'
+        f'border-top:1px solid var(--line-soft)">📦 Proxy-Volumen: '
+        f"{escape(traffic_line)}</div>"
+        if traffic_line
+        else ""
     )
 
     zustand = "".join(
@@ -609,6 +618,7 @@ def dashboard(
 
         <div class=card>
           <div class=sessions>{zustand}</div>
+          {volumen}
         </div>
 
         <h2>Neue Suche</h2>
