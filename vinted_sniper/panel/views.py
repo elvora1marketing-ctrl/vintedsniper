@@ -518,7 +518,7 @@ def _watch_card(watch: Watch, running: bool) -> str:
         <div class=info>
           <div class=name><span class=id>#{watch.id}</span>{escape(watch.name)} {pill}</div>
           <div class=meta>{domain.flag} {escape(watch.host)}{sep}{escape(watch.query.describe())}</div>
-          <div class=meta>alle {watch.interval}s{sep}{watch.hits} Treffer{sep}{ziel}{sep}<a
+          <div class=meta>alle {watch.interval}s{sep}{watch.hits} Treffer{beitrag}{sep}{ziel}{sep}<a
              href="{escape(watch.source_url)}" target=_blank rel=noopener>auf Vinted öffnen ↗</a></div>
           {fehler}
         </div>

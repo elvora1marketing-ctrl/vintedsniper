@@ -563,5 +563,54 @@ class HeartbeatTests(DatabaseTestCase):
         self.assertEqual(await self.db.get_meta("x"), "zwei")
 
 
+class ContributionTests(DatabaseTestCase):
+    """Trägt eine Länderkopie eigene Funde bei — oder nur Wiederholungen?
+
+    Das ist die Zahl, an der sich entscheidet, ob sich sieben Länder lohnen
+    oder ob Vinted die Artikel ohnehin länderübergreifend zeigt.
+    """
+
+    async def anlegen(self, host):
+        query = parse_search_url(f"https://{host}/catalog?search_text=nike")
+        return await self.db.add_watch(
+            guild_id=1, channel_id=2, creator_id=3, name=host,
+            query=query, source_url=query.web_url(), interval=60,
+        )
+
+    async def test_ohne_dubletten_null(self):
+        de = await self.anlegen("www.vinted.de")
+        await self.db.filter_new(de.id, ["1", "2"], scope="group",
+                                 group_key=de.group_key)
+        self.assertEqual(self.db.last_duplicates, 0)
+
+    async def test_zaehlt_was_die_schwestersuche_schon_hatte(self):
+        de = await self.anlegen("www.vinted.de")
+        fr = await self.anlegen("www.vinted.fr")
+        await self.db.filter_new(de.id, ["1", "2"], scope="group",
+                                 group_key=de.group_key)
+        neu = await self.db.filter_new(fr.id, ["1", "2", "3"], scope="group",
+                                       group_key=fr.group_key)
+        self.assertEqual(neu, {"3"})
+        self.assertEqual(self.db.last_duplicates, 2)
+
+    async def test_wird_auf_der_watch_festgehalten(self):
+        de = await self.anlegen("www.vinted.de")
+        await self.db.mark_checked(de.id, error=None, new_hits=1, dupes=4)
+        await self.db.mark_checked(de.id, error=None, new_hits=2, dupes=3)
+        aktuell = await self.db.get_watch(de.id)
+        self.assertEqual(aktuell.hits, 3)
+        self.assertEqual(aktuell.dupes, 7)
+
+    async def test_leere_abfrage_setzt_zurueck(self):
+        # Sonst würde der Zähler des vorigen Durchlaufs erneut mitgeschrieben.
+        de = await self.anlegen("www.vinted.de")
+        fr = await self.anlegen("www.vinted.fr")
+        await self.db.filter_new(de.id, ["1"], scope="group", group_key=de.group_key)
+        await self.db.filter_new(fr.id, ["1"], scope="group", group_key=fr.group_key)
+        self.assertEqual(self.db.last_duplicates, 1)
+        await self.db.filter_new(fr.id, [], scope="group", group_key=fr.group_key)
+        self.assertEqual(self.db.last_duplicates, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -465,6 +465,34 @@ EXCLUDE_WORDS=defekt,kaputt,riss,fleck,fake,replica,nachbau,bitte lesen
 REQUIRE_PHOTO=true
 ```
 
+### Brauchst du die Länderkopien überhaupt?
+
+Vinted zeigt im deutschen Katalog längst auch Artikel aus anderen Ländern,
+sofern der Verkäufer international versendet. Wie viel davon greift, hängt an
+Kategorie und Verkäufer — pauschal beantworten lässt sich das nicht.
+
+Deshalb misst der Sniper es an deinen eigenen Daten. Jede Suche zählt mit, wie
+oft sie etwas fand, das eine Schwestersuche **schon hatte**:
+
+```
+#12 · Quarter Zip 🇫🇷    alle 60s · 3 Treffer · 47 doppelt
+```
+
+Drei eigene Funde gegen siebenundvierzig Wiederholungen: die französische Kopie
+trägt fast nichts bei und kostet trotzdem ein Siebtel deines Proxy-Volumens.
+Weg damit.
+
+```
+#15 · Quarter Zip 🇮🇹    alle 60s · 21 Treffer · 4 doppelt
+```
+
+Umgekehrt: Italien findet Ware, die in Deutschland nicht auftaucht. Die Kopie
+lohnt sich.
+
+Nach ein, zwei Tagen steht in der Liste, welche Länder tragen und welche nur
+Volumen kosten. Danach im Panel die Häkchen setzen und pausieren — die
+Sammelauswahl kann nach Land filtern.
+
 ### Dieselbe Suche in mehreren Ländern
 
 Derselbe Artikel kostet in Frankreich oder Italien oft deutlich weniger als in

@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS watches (
     webhook_url     TEXT    NOT NULL DEFAULT '',
     -- 'command' = per /watch add angelegt, 'file' = aus searches.toml.
     origin          TEXT    NOT NULL DEFAULT 'command',
+    -- Wie oft diese Suche etwas fand, das eine Schwestersuche schon hatte.
+    -- Daran sieht man, ob eine Länderkopie eigenen Wert liefert oder nur
+    -- wiederholt, was ohnehin schon aufgefallen wäre.
+    dupes           INTEGER NOT NULL DEFAULT 0,
     -- Gemeinsame Kennung aller Länderkopien einer Suche. Vinted vergibt
     -- Artikel-IDs länderübergreifend; ohne die würde derselbe Fund von jeder
     -- Länderkopie einzeln gemeldet.
@@ -101,6 +105,7 @@ class Watch:
     webhook_url: str = ""
     origin: str = "command"
     group_key: str = ""
+    dupes: int = 0
 
     @property
     def query(self) -> SearchQuery:
@@ -131,6 +136,7 @@ class Watch:
             webhook_url=row["webhook_url"] or "",
             origin=row["origin"] or "command",
             group_key=row["group_key"] or "",
+            dupes=row["dupes"] or 0,
         )
 
 
@@ -149,6 +155,11 @@ class Database:
         # zwei Länderkopien im selben Moment feststellen, dass ein Artikel noch
         # niemandem aufgefallen ist — und ihn beide melden.
         self._write_lock = asyncio.Lock()
+        # Wie viele Artikel der letzte `filter_new`-Aufruf verworfen hat, weil
+        # eine Schwestersuche sie schon gemeldet hatte. Steht hier statt im
+        # Rückgabewert, damit die Signatur schlank bleibt; gelesen wird er
+        # direkt nach dem Aufruf, noch unter derselben Sperre der Watch.
+        self.last_duplicates = 0
 
     async def connect(self) -> None:
         try:
@@ -187,6 +198,7 @@ class Database:
             ("webhook_url", "ALTER TABLE watches ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''"),
             ("origin", "ALTER TABLE watches ADD COLUMN origin TEXT NOT NULL DEFAULT 'command'"),
             ("group_key", "ALTER TABLE watches ADD COLUMN group_key TEXT NOT NULL DEFAULT ''"),
+            ("dupes", "ALTER TABLE watches ADD COLUMN dupes INTEGER NOT NULL DEFAULT 0"),
         ):
             if column not in existing:
                 await self._conn.execute(ddl)
@@ -379,14 +391,22 @@ class Database:
         await self.conn.commit()
         return cursor.rowcount > 0
 
-    async def mark_checked(self, watch_id: int, *, error: str | None, new_hits: int = 0) -> None:
+    async def mark_checked(
+        self,
+        watch_id: int,
+        *,
+        error: str | None,
+        new_hits: int = 0,
+        dupes: int = 0,
+    ) -> None:
         await self.conn.execute(
             """
             UPDATE watches
-               SET last_checked_at = ?, last_error = ?, hits = hits + ?
+               SET last_checked_at = ?, last_error = ?, hits = hits + ?,
+                   dupes = dupes + ?
              WHERE id = ?
             """,
-            (int(time.time()), error, new_hits, watch_id),
+            (int(time.time()), error, new_hits, dupes, watch_id),
         )
         await self.conn.commit()
 
@@ -447,6 +467,7 @@ class Database:
         im selben Moment abfragen, würden sonst beide „noch niemand hat's
         gemeldet" sehen und beide alerten.
         """
+        self.last_duplicates = 0
         if not item_ids:
             return set()
 
@@ -476,6 +497,7 @@ class Database:
             )
             await self.conn.commit()
 
+        self.last_duplicates = len(anderswo)
         return {item_id for item_id in fresh if item_id not in anderswo}
 
     # ------------------------------------------------------- Betriebszustand

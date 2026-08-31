@@ -166,6 +166,10 @@ class Monitor:
                     scope=self.settings.dedupe_scope,
                     group_key=watch.group_key,
                 )
+                # Wie viel diese Suche beigetragen hat, das nicht ohnehin eine
+                # Schwestersuche gefunden hätte. Bei Länderkopien ist das die
+                # Zahl, an der man entscheidet, ob sie sich lohnen.
+                dupes = self.db.last_duplicates
 
                 if not primed:
                     # Erster Durchlauf: nur den Ist-Zustand einlesen. Sonst
@@ -177,7 +181,7 @@ class Monitor:
                         watch.name,
                         len(new_ids),
                     )
-                    await self.db.mark_checked(watch_id, error=None)
+                    await self.db.mark_checked(watch_id, error=None, dupes=dupes)
                 else:
                     fresh = [item for item in items if item.id in new_ids]
                     fresh = [item for item in fresh if self._is_recent(item)]
@@ -197,7 +201,9 @@ class Monitor:
                             len(fresh),
                         )
                         await self._safe_items(watch, fresh)
-                    await self.db.mark_checked(watch_id, error=None, new_hits=len(fresh))
+                    await self.db.mark_checked(
+                        watch_id, error=None, new_hits=len(fresh), dupes=dupes
+                    )
 
             await asyncio.sleep(self._with_jitter(delay))
 
