@@ -13,6 +13,9 @@ from .vinted.models import Item
 VINTED_TEAL = 0x09B1BA
 WARN_ORANGE = 0xE67E22
 OK_GREEN = 0x2ECC71
+# Deutlich unter Marktpreis. Ein eigener Farbton, damit im Nachrichtenstrom
+# sofort auffällt, wo sich das Hinschauen lohnt.
+DEAL_GREEN = 0x21A366
 
 
 def _age_label(item: Item) -> str:
@@ -32,16 +35,25 @@ def item_embed(item: Item, watch: Watch, *, include_links: bool = False) -> disc
     `include_links` hängt die Links als Feld an. Das braucht der Webhook-Weg:
     ein per URL angelegter Webhook gehört keiner Anwendung und darf deshalb
     keine Buttons mitschicken — ohne das Feld käme der Alert ohne Kauflink an.
+
+    `item.price_note` ordnet den Preis ein („38 % unter Median"). Beim Snipen
+    zählt genau das: ob sich der Klick lohnt, entscheidet sich in Sekunden.
     """
     domain = domains.lookup(item.host)
+    schnaeppchen = bool(item.price_note and "unter**" in item.price_note)
 
     embed = discord.Embed(
         title=item.title[:250],
+        # Eigene Farbe für Funde unter Marktpreis: im Nachrichtenstrom sieht
+        # man das, bevor man liest.
+        color=DEAL_GREEN if schnaeppchen else VINTED_TEAL,
         url=item.url,
-        color=VINTED_TEAL,
         timestamp=dt.datetime.now(dt.timezone.utc),
     )
-    embed.add_field(name="Preis", value=item.price_label(), inline=True)
+    preis = item.price_label()
+    if item.price_note:
+        preis = f"{preis}\n{item.price_note}"
+    embed.add_field(name="Preis", value=preis, inline=True)
     if item.size:
         embed.add_field(name="Größe", value=item.size, inline=True)
     if item.brand:

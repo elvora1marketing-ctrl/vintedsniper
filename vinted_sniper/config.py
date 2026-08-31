@@ -59,6 +59,13 @@ def _ids(name: str) -> tuple[int, ...]:
     return tuple(werte)
 
 
+def _words(name: str) -> tuple[str, ...]:
+    """Komma-getrennte Stichwörter, kleingeschrieben und entdoppelt."""
+    roh = os.getenv(name, "")
+    werte = [teil.strip().lower() for teil in roh.split(",")]
+    return tuple(dict.fromkeys(wort for wort in werte if wort))
+
+
 def _choice(name: str, default: str, erlaubt: tuple[str, ...]) -> str:
     roh = os.getenv(name, "").strip().lower()
     if not roh:
@@ -151,6 +158,19 @@ class Settings:
     # Items, die älter sind als das, werden beim ersten Lauf nie gealertet.
     max_item_age: int
 
+    # --- Was überhaupt gemeldet wird ---
+    # Nur melden, was mindestens so viel Prozent unter dem Median vergleichbarer
+    # Angebote liegt. 0 = alles melden.
+    min_discount: float
+    # Zeitfenster für die Vergleichspreise, in Tagen.
+    price_window_days: int
+    # Artikel unter diesem Preis überspringen — meist Kleinkram.
+    min_price: float
+    # Wörter im Titel, die einen Artikel aussortieren (kaputt, Fälschung …).
+    exclude_words: tuple[str, ...]
+    # Artikel ohne Foto überspringen — unverkäuflich, und nicht beurteilbar.
+    require_photo: bool
+
     # --- Antibot / Netzwerk ---
     impersonate: str
     proxies: list[str] = field(default_factory=list)
@@ -207,6 +227,11 @@ class Settings:
             per_page=max(1, min(96, _int("PER_PAGE", 20))),
             jitter=max(0.0, _float("JITTER", 0.25)),
             max_item_age=_int("MAX_ITEM_AGE", 900),
+            min_discount=max(0.0, _float("MIN_DISCOUNT", 0.0)),
+            price_window_days=max(1, _int("PRICE_WINDOW_DAYS", 30)),
+            min_price=max(0.0, _float("MIN_PRICE", 0.0)),
+            exclude_words=_words("EXCLUDE_WORDS"),
+            require_photo=_bool("REQUIRE_PHOTO", False),
             impersonate=os.getenv("IMPERSONATE", "chrome124").strip() or "chrome124",
             proxies=load_proxies(
                 inline=os.getenv("PROXIES", ""),

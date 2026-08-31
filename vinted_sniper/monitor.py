@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from dataclasses import replace
 from typing import Awaitable, Callable
 
+from . import pricing
 from .config import Settings
 from .db import Database, Watch
 from .vinted.client import VintedClient
@@ -131,6 +133,18 @@ class Monitor:
                 consecutive_errors = 0
                 notified_trouble = False
 
+                # Vor allem anderen: die Preise aller gesehenen Artikel in die
+                # Vergleichsbasis. Auch die schon bekannten — die Basis soll
+                # den Markt abbilden, nicht nur die Zugänge.
+                await self.db.record_prices(
+                    watch.group_key,
+                    [
+                        (item.id, item.price, item.currency)
+                        for item in items
+                        if item.price is not None
+                    ],
+                )
+
                 new_ids = await self.db.filter_new(
                     watch_id,
                     [item.id for item in items],
@@ -152,6 +166,9 @@ class Monitor:
                 else:
                     fresh = [item for item in items if item.id in new_ids]
                     fresh = [item for item in fresh if self._is_recent(item)]
+                    fresh = [item for item in fresh if self._is_wanted(item)]
+                    fresh = await self._only_deals(watch, fresh)
+                    fresh = await self._annotate(watch, fresh)
                     # Älteste zuerst posten, damit die Discord-Timeline stimmt.
                     fresh.reverse()
                     if fresh:
@@ -165,6 +182,73 @@ class Monitor:
                     await self.db.mark_checked(watch_id, error=None, new_hits=len(fresh))
 
             await asyncio.sleep(self._with_jitter(delay))
+
+    def _is_wanted(self, item: Item) -> bool:
+        """Offensichtlichen Ausschuss aussortieren, bevor er einen Alert kostet.
+
+        Kaputte Ware und Fälschungen stehen fast immer im Titel. Ein Artikel
+        ohne Foto ist beim Weiterverkauf wertlos, und Ein-Euro-Posten sind
+        selten das, wonach jemand sucht.
+        """
+        if self.settings.min_price > 0 and item.price is not None:
+            if item.price < self.settings.min_price:
+                return False
+        if self.settings.require_photo and not item.photo_url:
+            return False
+        if self.settings.exclude_words:
+            titel = item.title.lower()
+            if any(wort in titel for wort in self.settings.exclude_words):
+                return False
+        return True
+
+    async def _only_deals(self, watch: Watch, items: list[Item]) -> list[Item]:
+        """Nur melden, was deutlich unter dem Marktpreis liegt.
+
+        Ohne Schwelle (`MIN_DISCOUNT=0`) bleibt alles drin. Ohne belastbare
+        Vergleichsbasis ebenfalls — sonst wäre eine frisch angelegte Suche
+        stundenlang stumm, also genau dann, wenn man sie beobachtet.
+        """
+        if not items or self.settings.min_discount <= 0:
+            return items
+
+        gefiltert: list[Item] = []
+        for item in items:
+            stats = await self._price_stats(watch, item)
+            rabatt = pricing.discount(item.price, stats)
+            if pricing.is_deal(rabatt, self.settings.min_discount):
+                gefiltert.append(item)
+            else:
+                log.debug(
+                    "Watch %s: %s übersprungen (%.0f %% unter Median, nötig %.0f %%).",
+                    watch.id,
+                    item.id,
+                    rabatt or 0.0,
+                    self.settings.min_discount,
+                )
+        if len(gefiltert) < len(items):
+            log.info(
+                "Watch %s (%s): %d von %d Treffern waren keine Schnäppchen.",
+                watch.id,
+                watch.name,
+                len(items) - len(gefiltert),
+                len(items),
+            )
+        return gefiltert
+
+    async def _price_stats(self, watch: Watch, item: Item):
+        preise = await self.db.recent_prices(
+            watch.group_key, item.currency, days=self.settings.price_window_days
+        )
+        return pricing.stats_from(preise)
+
+    async def _annotate(self, watch: Watch, items: list[Item]) -> list[Item]:
+        """Jedem Fund seine Preiseinordnung mitgeben („38 % unter Median")."""
+        annotiert: list[Item] = []
+        for item in items:
+            stats = await self._price_stats(watch, item)
+            notiz = pricing.label(pricing.discount(item.price, stats), stats)
+            annotiert.append(replace(item, price_note=notiz) if notiz else item)
+        return annotiert
 
     def _is_recent(self, item: Item) -> bool:
         """Uralte Listings rausfiltern, die Vinted gelegentlich neu einsortiert."""
@@ -203,6 +287,13 @@ class Monitor:
                 removed = await self.db.prune_seen()
                 if removed:
                     log.info("Housekeeping: %d alte Item-Einträge entfernt.", removed)
+                # Preise leben länger als die Merkzettel: sie sind die
+                # Vergleichsbasis und werden mit der Zeit besser.
+                veraltet = await self.db.prune_prices(
+                    older_than_days=max(60, self.settings.price_window_days * 2)
+                )
+                if veraltet:
+                    log.info("Housekeeping: %d alte Preisdaten entfernt.", veraltet)
             except asyncio.CancelledError:
                 raise
             except Exception:

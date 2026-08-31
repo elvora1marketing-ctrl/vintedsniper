@@ -479,5 +479,59 @@ class DedupeTests(DatabaseTestCase):
         )
 
 
+class PriceSampleTests(DatabaseTestCase):
+    """Die Vergleichsbasis, aus der „38 % unter Median" entsteht."""
+
+    async def test_sammeln_und_lesen(self):
+        await self.db.record_prices("g", [("1", 10.0, "EUR"), ("2", 20.0, "EUR")])
+        self.assertEqual(sorted(await self.db.recent_prices("g", "EUR")), [10.0, 20.0])
+
+    async def test_ein_artikel_zaehlt_nur_einmal(self):
+        # Jeder Durchlauf liefert dieselben Artikel erneut — ohne das würde ein
+        # lange stehendes Angebot den Median dominieren.
+        await self.db.record_prices("g", [("1", 10.0, "EUR")])
+        await self.db.record_prices("g", [("1", 99.0, "EUR")])
+        self.assertEqual(await self.db.recent_prices("g", "EUR"), [10.0])
+
+    async def test_waehrungen_werden_nicht_vermischt(self):
+        # 40 PLN neben 40 EUR macht den Median unbrauchbar.
+        await self.db.record_prices("g", [("1", 10.0, "EUR"), ("2", 200.0, "PLN")])
+        self.assertEqual(await self.db.recent_prices("g", "EUR"), [10.0])
+        self.assertEqual(await self.db.recent_prices("g", "PLN"), [200.0])
+
+    async def test_suchen_teilen_sich_nichts(self):
+        await self.db.record_prices("nike", [("1", 10.0, "EUR")])
+        await self.db.record_prices("carhartt", [("2", 20.0, "EUR")])
+        self.assertEqual(await self.db.recent_prices("nike", "EUR"), [10.0])
+
+    async def test_laenderkopien_teilen_sich_die_basis(self):
+        # Dieselbe Kennung heißt: Frankreich füttert Deutschlands Vergleichsbasis.
+        # Genau so wird sie siebenmal so schnell belastbar.
+        await self.db.record_prices("g", [("1", 10.0, "EUR")])
+        await self.db.record_prices("g", [("2", 30.0, "EUR")])
+        self.assertEqual(len(await self.db.recent_prices("g", "EUR")), 2)
+
+    async def test_nullpreise_kommen_nicht_rein(self):
+        await self.db.record_prices("g", [("1", 0.0, "EUR"), ("2", 5.0, "EUR")])
+        self.assertEqual(await self.db.recent_prices("g", "EUR"), [5.0])
+
+    async def test_ohne_kennung_wird_nichts_gesammelt(self):
+        # Sicherheitsnetz: sonst landete alles in einem Topf "".
+        await self.db.record_prices("", [("1", 10.0, "EUR")])
+        self.assertEqual(await self.db.recent_prices("", "EUR"), [])
+
+    async def test_altes_wird_ausgeraeumt(self):
+        await self.db.record_prices("g", [("1", 10.0, "EUR")])
+        # -1 Tage heißt „Stichtag in der Zukunft" und räumt damit auch den
+        # gerade geschriebenen Eintrag ab; mit 0 läge er genau auf der Grenze.
+        self.assertEqual(await self.db.prune_prices(older_than_days=-1), 1)
+        self.assertEqual(await self.db.recent_prices("g", "EUR"), [])
+
+    async def test_frisches_bleibt_beim_ausraeumen(self):
+        await self.db.record_prices("g", [("1", 10.0, "EUR")])
+        self.assertEqual(await self.db.prune_prices(older_than_days=60), 0)
+        self.assertEqual(await self.db.recent_prices("g", "EUR"), [10.0])
+
+
 if __name__ == "__main__":
     unittest.main()

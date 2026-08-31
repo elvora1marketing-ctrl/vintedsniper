@@ -50,6 +50,22 @@ CREATE TABLE IF NOT EXISTS seen_items (
     PRIMARY KEY (watch_id, item_id)
 );
 
+-- Preise aller gesehenen Artikel je Suchgruppe. Daraus entsteht die
+-- Vergleichsbasis, gegen die ein neuer Fund gehalten wird. Der Primärschlüssel
+-- sorgt dafür, dass ein Artikel nur einmal zählt, auch wenn ihn jeder
+-- Durchlauf erneut liefert.
+CREATE TABLE IF NOT EXISTS price_samples (
+    group_key TEXT NOT NULL,
+    item_id   TEXT NOT NULL,
+    price     REAL NOT NULL,
+    currency  TEXT NOT NULL,
+    seen_at   INTEGER NOT NULL,
+    PRIMARY KEY (group_key, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_lookup
+    ON price_samples(group_key, currency, seen_at);
+
 CREATE INDEX IF NOT EXISTS idx_seen_at ON seen_items(seen_at);
 -- Für die Entdopplung über Watches hinweg: dort wird nach item_id allein
 -- gesucht, der Primärschlüssel (watch_id, item_id) hilft dabei nicht.
@@ -453,6 +469,60 @@ class Database:
             await self.conn.commit()
 
         return {item_id for item_id in fresh if item_id not in anderswo}
+
+    # -------------------------------------------------------------- Preise
+
+    async def record_prices(
+        self, group_key: str, samples: list[tuple[str, float, str]]
+    ) -> None:
+        """Preise gesehener Artikel in die Vergleichsbasis aufnehmen.
+
+        Aufgerufen wird das mit **allen** Artikeln eines Durchlaufs, nicht nur
+        den neuen: die Vergleichsbasis soll den Markt abbilden, nicht nur die
+        Zugänge. `INSERT OR IGNORE` sorgt dafür, dass jeder Artikel trotzdem
+        genau einmal zählt — mit dem Preis, zu dem er zuerst gesehen wurde.
+        """
+        if not group_key or not samples:
+            return
+        now = int(time.time())
+        await self.conn.executemany(
+            "INSERT OR IGNORE INTO price_samples "
+            "(group_key, item_id, price, currency, seen_at) VALUES (?, ?, ?, ?, ?)",
+            [
+                (group_key, item_id, price, currency, now)
+                for item_id, price, currency in samples
+                if price > 0
+            ],
+        )
+        await self.conn.commit()
+
+    async def recent_prices(
+        self, group_key: str, currency: str, *, days: int = 30, limit: int = 500
+    ) -> list[float]:
+        """Vergleichspreise einer Suchgruppe.
+
+        Nur dieselbe Währung: 40 PLN neben 40 EUR würde den Median unbrauchbar
+        machen. Und nur aus dem gewählten Zeitfenster — Preise von vor einem
+        halben Jahr sagen über den heutigen Markt wenig.
+        """
+        if not group_key:
+            return []
+        cutoff = int(time.time()) - days * 86_400
+        async with self.conn.execute(
+            "SELECT price FROM price_samples "
+            "WHERE group_key = ? AND currency = ? AND seen_at >= ? "
+            "ORDER BY seen_at DESC LIMIT ?",
+            (group_key, currency, cutoff, limit),
+        ) as cursor:
+            return [row["price"] for row in await cursor.fetchall()]
+
+    async def prune_prices(self, older_than_days: int = 60) -> int:
+        cutoff = int(time.time()) - older_than_days * 86_400
+        cursor = await self.conn.execute(
+            "DELETE FROM price_samples WHERE seen_at < ?", (cutoff,)
+        )
+        await self.conn.commit()
+        return cursor.rowcount
 
     async def has_seen_any(self, watch_id: int) -> bool:
         """Hat diese Watch schon einmal Artikel erfasst?

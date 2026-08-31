@@ -238,6 +238,45 @@ live geprüft: bei fünfzig Zeilen wären das fünfzig Abfragen auf einen Schlag
 und genau dafür sperrt Vinted zuverlässig. Taugt eine Suche nicht, steht sie
 nach dem ersten Durchlauf mit Fehler in der Übersicht.
 
+### Nur melden, was Geld wert ist
+
+Ein Sniper, der jeden neuen Treffer meldet, produziert vor allem Rauschen.
+Fürs Weiterverkaufen zählt nicht „neu", sondern „deutlich unter dem, was
+Vergleichbares kostet".
+
+Die Vergleichsbasis entsteht nebenbei: bei jedem Durchlauf sieht der Sniper
+ohnehin die aktuellen Angebote einer Suche. Ihre Preise werden gesammelt, und
+jeder neue Fund wird gegen den Median gehalten. Der Alert zeigt das Ergebnis
+mit — „**38 % unter** Median (40 €, 217 Vergleiche)" — und färbt sich grün,
+wenn der Fund darunter liegt.
+
+```
+MIN_DISCOUNT=30
+```
+
+Ab dann kommen nur noch Funde durch, die mindestens 30 % unter dem Median
+liegen. Bis 25 Vergleichswerte beisammen sind, wird nur gesammelt und alles
+gemeldet — ein Sniper, der aus Datenmangel schweigt, ist schlimmer als einer,
+der zu viel meldet.
+
+**Was der Median ist und was nicht:** Er ist der *Angebotspreis* vergleichbarer
+Artikel, nicht der erzielte Verkaufspreis — Verkaufspreise gibt Vinted nicht
+heraus. „30 % unter Median" heißt „deutlich günstiger als das, was gerade sonst
+angeboten wird". Das ist ein brauchbarer Näherungswert, keine Gewinngarantie.
+
+**Und er taugt nur so viel, wie die Suche eng ist.** `search_text=nike` mischt
+Socken mit Sneakern; der Median daraus sagt nichts. `Nike Air Max 90` mit Größe
+und Zustand liefert eine Zahl, auf die man sich verlassen kann. Eine enge Suche
+ist hier mehr wert als jede Einstellung.
+
+Dazu drei Filter gegen offensichtlichen Ausschuss:
+
+```
+MIN_PRICE=5
+EXCLUDE_WORDS=defekt,kaputt,riss,fleck,fake,replica,nachbau,bitte lesen
+REQUIRE_PHOTO=true
+```
+
 ### Dieselbe Suche in mehreren Ländern
 
 Derselbe Artikel kostet in Frankreich oder Italien oft deutlich weniger als in
@@ -425,6 +464,11 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `PER_PAGE` | `20` | Artikel pro Abfrage. |
 | `JITTER` | `0.25` | Zufallsanteil auf jedes Intervall (±25 %). |
 | `MAX_ITEM_AGE` | `900` | Artikel, die älter sind, werden nicht gemeldet. `0` = aus. |
+| `MIN_DISCOUNT` | `0` | Nur melden, was mindestens so viel Prozent unter dem Median vergleichbarer Angebote liegt. `0` = alles melden. |
+| `PRICE_WINDOW_DAYS` | `30` | Zeitfenster der Vergleichspreise. |
+| `MIN_PRICE` | `0` | Artikel unter diesem Preis überspringen. |
+| `EXCLUDE_WORDS` | — | Komma-getrennte Wörter, die einen Artikel am Titel aussortieren. |
+| `REQUIRE_PHOTO` | `false` | Artikel ohne Foto überspringen. |
 | `IMPERSONATE` | `chrome124` | Browser-Profil für die TLS-Impersonation. |
 | `PROXIES` | — | Komma-getrennte Proxy-Liste für wenige Einträge. |
 | `PROXIES_FILE` | `proxies.txt` | Datei mit einer Proxy-Zeile je Zeile — für große Anbieterlisten. |

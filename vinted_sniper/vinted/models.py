@@ -41,6 +41,9 @@ class Item:
     favourites: int
     views: int
     posted_ts: int | None
+    # Einordnung des Preises („38 % unter Median"). Wird erst beim Melden
+    # gesetzt — die Vergleichsbasis kennt nur der Monitor, nicht der Parser.
+    price_note: str | None = None
 
     @property
     def buy_url(self) -> str:
