@@ -11,8 +11,9 @@ from discord.ext import commands
 from ..db import Watch, serialize_query
 from ..vinted import domains
 from ..vinted.session import VintedError
+from ..vinted.models import Item
 from ..vinted.urls import InvalidSearchURL, SearchQuery, parse_search_url
-from .. import bulk, embeds
+from .. import bulk, deals, embeds
 from . import cleanup
 
 if TYPE_CHECKING:
@@ -532,6 +533,139 @@ class WatchCommands(commands.Cog):
             embeds=[embeds.item_embed(item, preview) for item in items[:3]],
             ephemeral=True,
         )
+
+
+class EvaluateCommand(commands.Cog):
+    """`/pruefen` — einen Fund bewerten, ohne Vinted abzufragen.
+
+    Der Weg ohne automatisches Abfragen: Vinted schickt seine eigenen
+    Benachrichtigungen zu gespeicherten Suchen, du gibst die Eckdaten hier ein,
+    und der Bot rechnet Marge, Rendite und maximalen Einkaufspreis aus. Es geht
+    dabei keine einzige Anfrage an Vinted raus — gerechnet wird mit dem, was in
+    der Benachrichtigung steht.
+    """
+
+    def __init__(self, bot: "SniperBot") -> None:
+        self.bot = bot
+
+    @app_commands.command(
+        name="pruefen",
+        description="Einen Fund durchrechnen — Ampel, Marge, maximaler Einkaufspreis",
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(
+        titel="Titel des Angebots (entscheidet, welches Kaufprofil greift)",
+        preis="Artikelpreis in Euro",
+        groesse="Größe laut Angebot (M, L, XL …)",
+        zustand="Zustand laut Angebot (z. B. Sehr gut)",
+        checkout="Tatsächlicher Checkout-Gesamtpreis, falls schon bekannt",
+        url="Link zum Angebot (optional, nur fürs Protokoll)",
+    )
+    async def pruefen(
+        self,
+        interaction: discord.Interaction,
+        titel: str,
+        preis: float,
+        groesse: str | None = None,
+        zustand: str | None = None,
+        checkout: float | None = None,
+        url: str | None = None,
+    ) -> None:
+        profile = self.bot.monitor.profiles
+        if not profile:
+            await interaction.response.send_message(
+                "Es sind keine Kaufprofile hinterlegt. Lege `profiles.toml` an "
+                "(Vorlage: `profiles.example.toml`), sonst gibt es nichts zu "
+                "rechnen.",
+                ephemeral=True,
+            )
+            return
+
+        fund = Item(
+            id=url or titel,
+            host="www.vinted.de",
+            title=titel,
+            url=url or "",
+            price=preis,
+            total_price=checkout,
+            currency="EUR",
+            brand=None,
+            size=groesse,
+            condition=zustand,
+            photo_url=None,
+            seller=None,
+            seller_url=None,
+            favourites=0,
+            views=0,
+            posted_ts=None,
+        )
+
+        urteil = deals.best_verdict(fund, profile)
+        if urteil is None:
+            namen = ", ".join(p.name for p in profile)
+            await interaction.response.send_message(
+                f"„{titel}“ passt auf keins deiner Profile ({namen}). Steht die "
+                "Produktart im Titel?",
+                ephemeral=True,
+            )
+            return
+
+        grenze = deals.max_buy_price(urteil.profile)
+        embed = discord.Embed(
+            title=f"{titel[:200]}",
+            url=url or None,
+            description=urteil.headline(),
+            color=(
+                embeds.DEAL_GREEN
+                if urteil.grade == deals.GREEN
+                else embeds.DEAL_AMBER
+                if urteil.grade == deals.YELLOW
+                else embeds.WARN_ORANGE
+            ),
+        )
+        if urteil.notes:
+            embed.add_field(
+                name="Was dagegen spricht",
+                value="\n".join(f"• {n}" for n in urteil.notes),
+                inline=False,
+            )
+        embed.add_field(
+            name="Dein maximaler Artikelpreis",
+            value=(
+                f"**{grenze:.2f} €** für „{urteil.profile.name}“ — darüber "
+                f"bleibt weniger als {urteil.profile.thresholds.min_profit:.0f} € "
+                "Gewinn übrig."
+            ).replace(".", ",", 1),
+            inline=False,
+        )
+        if checkout is None:
+            embed.add_field(
+                name="Noch offen",
+                value=(
+                    "Gerechnet wurde mit **geschätzten** Versand- und "
+                    "Käuferschutzkosten. Leg den Artikel in den Vinted-Checkout, "
+                    "lies den echten Gesamtbetrag ab und ruf `/pruefen` mit "
+                    "`checkout:` noch einmal auf."
+                ),
+                inline=False,
+            )
+        embed.add_field(
+            name="Vor dem Kauf prüfen",
+            value="\n".join(f"☐ {punkt}" for punkt in deals.CHECKLIST),
+            inline=False,
+        )
+        embed.add_field(
+            name="Wirklich verkaufte Vergleichsartikel",
+            value=f"[bei eBay nachsehen]({deals.ebay_sold_url(fund)})",
+            inline=False,
+        )
+        if urteil.grade == deals.YELLOW:
+            embed.add_field(
+                name="Nachricht an den Verkäufer",
+                value=f"```\n{deals.SELLER_QUESTION}\n```",
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed)
 
 
 class ChannelCommands(commands.Cog):

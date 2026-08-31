@@ -268,5 +268,51 @@ class ProfileFileTests(unittest.TestCase):
         self.assertEqual(profile[0].costs.reserve, 3.0)
 
 
+class MaxBuyPriceTests(unittest.TestCase):
+    """Die Umkehrung der Gewinnrechnung — „bis hierhin und keinen Euro weiter"."""
+
+    def setUp(self):
+        self.zip_profil, self.knit_profil = load_profiles(BEISPIEL)
+
+    def test_bei_der_grenze_stimmt_die_marge_noch(self):
+        grenze = deals.max_buy_price(self.zip_profil)
+        urteil = deals.evaluate(item(preis=grenze), self.zip_profil)
+        self.assertTrue(urteil.accepted)
+        self.assertGreaterEqual(
+            urteil.profit, self.zip_profil.thresholds.min_profit - 0.01
+        )
+
+    def test_einen_euro_darueber_nicht_mehr(self):
+        grenze = deals.max_buy_price(self.zip_profil)
+        urteil = deals.evaluate(item(preis=grenze + 1), self.zip_profil)
+        self.assertEqual(urteil.grade, deals.RED)
+
+    def test_die_engste_grenze_gewinnt(self):
+        # Aus der Marge kämen hier gut 12 € heraus, `max_item_price` deckelt
+        # aber bei 10 — die kleinere Zahl muss gelten.
+        self.assertLessEqual(
+            deals.max_buy_price(self.zip_profil), self.zip_profil.max_item_price
+        )
+
+    def test_teurer_versand_senkt_die_grenze(self):
+        guenstig = deals.Profile(
+            name="a", match_any=("zip",), resale_price=31.0,
+            costs=deals.Costs(shipping=2.99),
+        )
+        teuer = deals.Profile(
+            name="b", match_any=("zip",), resale_price=31.0,
+            costs=deals.Costs(shipping=6.99),
+        )
+        self.assertLess(deals.max_buy_price(teuer), deals.max_buy_price(guenstig))
+
+    def test_nie_negativ(self):
+        # Ein Verkaufspreis unter den Fixkosten darf keine negative Grenze
+        # ergeben — „kauf für minus drei Euro" ist keine Aussage.
+        aussichtslos = deals.Profile(
+            name="x", match_any=("zip",), resale_price=5.0
+        )
+        self.assertEqual(deals.max_buy_price(aussichtslos), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

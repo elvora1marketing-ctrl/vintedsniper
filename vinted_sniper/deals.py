@@ -111,6 +111,34 @@ RED = "rot"
 _AMPEL = {GREEN: "🟢 GRÜN — kaufen", YELLOW: "🟡 GELB — erst nachfragen", RED: "🔴 ROT"}
 
 
+def max_buy_price(profile: Profile) -> float:
+    """Der höchste Artikelpreis, bei dem die Marge noch stimmt.
+
+    Die Umkehrung der Gewinnrechnung — und die Zahl, die man beim Angebot
+    tatsächlich braucht: „bis hierhin und keinen Euro weiter."
+
+        VK − Reserve − Mindestgewinn ≥ Preis·(1 + Käuferschutz%) + Fixkosten
+
+    Begrenzt zusätzlich durch die eingetragenen Obergrenzen für Artikelpreis
+    und Gesamtkosten — was davon zuerst greift, gewinnt.
+    """
+    kosten = profile.costs
+    grenzen = profile.thresholds
+
+    fix = kosten.shipping + kosten.protection_fixed + kosten.refurb
+    anteil = 1 + kosten.protection_percent / 100.0
+    aus_marge = (
+        profile.resale_price - kosten.reserve - grenzen.min_profit - fix
+    ) / anteil
+
+    kandidaten = [aus_marge]
+    if profile.max_item_price:
+        kandidaten.append(profile.max_item_price)
+    if profile.max_total_cost:
+        kandidaten.append((profile.max_total_cost - fix) / anteil)
+    return max(0.0, min(kandidaten))
+
+
 @dataclass(frozen=True)
 class Verdict:
     """Das Urteil über einen Fund."""

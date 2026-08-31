@@ -196,6 +196,10 @@ class Settings:
     db_path: Path
 
     # --- Polling ---
+    # `False` = der Sniper fragt Vinted von sich aus nicht mehr ab. Panel,
+    # Bewertung, Entdopplung und Discord laufen weiter; Treffer kommen dann
+    # aus Vinteds eigenen Benachrichtigungen und werden hier nur bewertet.
+    polling_enabled: bool
     default_interval: int
     min_interval: int
     per_page: int
@@ -275,6 +279,7 @@ class Settings:
             alert_retention_hours=max(0, _int("ALERT_RETENTION_HOURS", 0)),
             cleanup_channel_ids=_ids("CLEANUP_CHANNELS"),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),
+            polling_enabled=_bool("POLLING", True),
             default_interval=default_interval,
             min_interval=min_interval,
             per_page=max(1, min(96, _int("PER_PAGE", 20))),

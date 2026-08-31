@@ -197,6 +197,53 @@ Panel auslösen, während du angemeldet bist.
 
 ---
 
+## Ohne eigenes Abfragen betreiben
+
+Vinted untersagt in seinen [AGB](https://www.vinted.com/terms-and-conditions)
+externe Bots und Scraper ohne ausdrückliche Erlaubnis. Ein längeres Intervall
+ändert daran nichts — es macht das Abfragen langsamer, nicht erlaubt. Es gibt
+keine Einstellung, bei der automatisches Abfragen unbedenklich wäre; wer es
+betreibt, trägt das Risiko für sein Konto selbst.
+
+Der Sniper lässt sich deshalb auch ohne eigenes Abfragen betreiben:
+
+```
+POLLING=off
+```
+
+Damit geht **keine einzige Anfrage** an Vinted raus. Was weiterläuft: das
+Panel, die Kaufprofile, die Ampel, die Preisreferenz, die Entdopplung und
+Discord. Der Weg, wie Treffer hereinkommen, ändert sich:
+
+1. Filter **auf Vinted** als gespeicherte Suche anlegen
+2. Vinteds eigene Benachrichtigungen einschalten
+3. Bei einem Treffer die Eckdaten in `/pruefen` eingeben
+4. Prüfen und selbst kaufen
+
+`/pruefen` macht dabei die Arbeit, die den Unterschied ausmacht:
+
+```
+/pruefen titel:Polo Ralph Lauren Quarter Zip Navy preis:9 groesse:L zustand:Sehr gut
+```
+
+> 🟢 **GRÜN — kaufen** · RL Quarter/Half Zip
+> ≈ **+14,86 € Gewinn** bei 13,14 € Gesamt-EK · 113 % ROI
+> **Dein maximaler Artikelpreis: 10,00 €**
+> ☐ Checkout-Preis ansehen — der zählt, nicht der Artikelpreis
+> ☐ Pflegeetikett vorhanden, möglichst 100 % Baumwolle …
+
+Mit `checkout:` gibst du den echten Betrag aus dem Vinted-Checkout an; ohne
+ihn wird mit geschätzten Versand- und Käuferschutzkosten gerechnet und der
+Alert sagt das dazu.
+
+Was in dieser Betriebsart schwächer wird: Die Preisreferenz (`MIN_DISCOUNT`)
+speist sich aus den Angeboten, die der Sniper sieht — ohne eigenes Abfragen
+sieht er fast keine. Der Median taugt dann wenig, und die eBay-Recherche nach
+tatsächlich verkauften Artikeln wird zur eigentlichen Grundlage. Der Link
+dafür hängt an jedem Ergebnis.
+
+---
+
 ## Proxy-Volumen im Blick behalten
 
 Beim Proxy zahlt man nach übertragenen Bytes, nicht nach Abfragen. Ist das
@@ -299,6 +346,7 @@ was reden könnte. Die fünf Minuten Einrichtung lohnen sich.
 | `/watch interval id: seconds:` | Prüfintervall ändern. |
 | `/watch remove id:` | Suche löschen. |
 | `/watch import [channel]` | Suchen aus `searches.toml` übernehmen — sie melden danach über den Bot und lassen sich per Command verwalten. Trefferhistorie bleibt erhalten. |
+| `/pruefen titel: preis: [groesse] [zustand] [checkout] [url]` | Rechnet einen Fund durch: Ampel, Marge, ROI, **maximaler Einkaufspreis**. Fragt Vinted **nicht** ab. |
 | `/status` | Zustand von Bot und Vinted-Sessions. |
 | `/clear [anzahl]` | Räumt den Channel auf (Standard 100 Nachrichten, höchstens 1000). Braucht **Nachrichten verwalten**. |
 
@@ -606,6 +654,7 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `CLEANUP_CHANNELS` | — | Channel-IDs zum Aufräumen. Leer = die Channels, in die der Bot selbst alertet. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
 | `MIN_INTERVAL` | `20` | Untergrenze, die `/watch interval` nicht unterschreitet. |
+| `POLLING` | `on` | `off` stellt jede Anfrage an Vinted ab — Bewertung, Panel und Discord laufen weiter. |
 | `PER_PAGE` | `20` | Artikel pro Abfrage. |
 | `JITTER` | `0.25` | Zufallsanteil auf jedes Intervall (±25 %). |
 | `MAX_ITEM_AGE` | `900` | Artikel, die älter sind, werden nicht gemeldet. `0` = aus. |

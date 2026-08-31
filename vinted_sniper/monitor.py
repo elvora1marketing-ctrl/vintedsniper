@@ -53,6 +53,16 @@ class Monitor:
     # ------------------------------------------------------------- Lebenszyklus
 
     async def start_all(self) -> int:
+        if not self.settings.polling_enabled:
+            # POLLING=off: keine einzige Anfrage an Vinted. Alles andere —
+            # Panel, Bewertung, Entdopplung, Discord — läuft weiter.
+            log.warning(
+                "POLLING=off: der Sniper fragt Vinted nicht von sich aus ab. "
+                "Treffer kommen aus Vinteds eigenen Benachrichtigungen und "
+                "werden hier nur bewertet (`/pruefen` oder im Panel)."
+            )
+            return 0
+
         watches = await self.db.list_watches()
         started = 0
         for watch in watches:
@@ -64,6 +74,8 @@ class Monitor:
         return started
 
     def start(self, watch: Watch) -> None:
+        if not self.settings.polling_enabled:
+            return
         self.stop(watch.id)
         self._tasks[watch.id] = asyncio.create_task(
             self._run(watch.id), name=f"watch-{watch.id}"

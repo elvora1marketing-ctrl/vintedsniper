@@ -88,11 +88,17 @@ class SniperBot(commands.Bot):
         # bremst, sind das Minuten, in denen ein Reverse-Proxy nur 502 liefert.
         await self.panel.start()
 
-        from .commands import ChannelCommands, StatusCommand, WatchCommands
+        from .commands import (
+            ChannelCommands,
+            EvaluateCommand,
+            StatusCommand,
+            WatchCommands,
+        )
 
         await self.add_cog(WatchCommands(self))
         await self.add_cog(StatusCommand(self))
         await self.add_cog(ChannelCommands(self))
+        await self.add_cog(EvaluateCommand(self))
 
         if self.settings.guild_id:
             guild = discord.Object(id=self.settings.guild_id)
