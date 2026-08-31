@@ -102,6 +102,26 @@ class SearchQuery:
             scalars=scalars,
         )
 
+    def group_key(self) -> str:
+        """Kennung, die alle Länderkopien derselben Suche teilen.
+
+        Vinted vergibt Artikel-IDs länderübergreifend — derselbe Artikel hat
+        auf `.de` und `.fr` dieselbe ID. Ohne eine gemeinsame Kennung würde
+        jede Länderkopie ihn einzeln melden. Host und Währung bleiben deshalb
+        außen vor: genau darin unterscheiden sich die Kopien, und nur darin.
+        """
+        teile = [
+            f"{key}={','.join(sorted(values))}"
+            for key, values in sorted(self.lists.items())
+            if values
+        ]
+        teile += [
+            f"{key}={value}"
+            for key, value in sorted(self.scalars.items())
+            if key != "currency"
+        ]
+        return "|".join(teile)
+
     def web_url(self) -> str:
         """Menschenlesbare Such-URL zurückbauen (für Embeds/`/watch list`)."""
         parts: list[str] = []

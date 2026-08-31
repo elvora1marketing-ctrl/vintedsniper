@@ -59,6 +59,22 @@ def _ids(name: str) -> tuple[int, ...]:
     return tuple(werte)
 
 
+def _choice(name: str, default: str, erlaubt: tuple[str, ...]) -> str:
+    roh = os.getenv(name, "").strip().lower()
+    if not roh:
+        return default
+    if roh not in erlaubt:
+        log.warning(
+            "%s=%r ist unbekannt (erlaubt: %s), nutze %s.",
+            name,
+            roh,
+            ", ".join(erlaubt),
+            default,
+        )
+        return default
+    return roh
+
+
 def _countries(name: str) -> tuple[str, ...]:
     """Länderliste wie `fr,nl,it` zu Vinted-Hosts auflösen."""
     gefunden, unbekannt = domains.parse_list(os.getenv(name, ""))
@@ -109,6 +125,10 @@ class Settings:
     # Artikel kostet im Ausland oft weniger — wer nur eine Domain beobachtet,
     # sieht ihn nie. Leer = nur die Domain aus der jeweiligen Such-URL.
     extra_countries: tuple[str, ...]
+    # Wie weit ein bereits gemeldeter Artikel andere Suchen stummschaltet.
+    # `group` = nur die Länderkopien derselben Suche (Standard), `all` = jede
+    # Suche, `watch` = gar nicht, jede Suche meldet für sich.
+    dedupe_scope: str
 
     # --- Aufräumen ---
     # Alerts älter als das werden automatisch gelöscht. 0 = aus.
@@ -178,6 +198,7 @@ class Settings:
             panel_host=os.getenv("PANEL_HOST", "0.0.0.0").strip() or "0.0.0.0",
             panel_port=_int("PANEL_PORT", 8080),
             extra_countries=_countries("EXTRA_COUNTRIES"),
+            dedupe_scope=_choice("DEDUPE_SCOPE", "group", ("group", "all", "watch")),
             alert_retention_hours=max(0, _int("ALERT_RETENTION_HOURS", 0)),
             cleanup_channel_ids=_ids("CLEANUP_CHANNELS"),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),

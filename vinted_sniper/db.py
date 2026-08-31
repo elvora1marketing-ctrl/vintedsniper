@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -35,7 +36,11 @@ CREATE TABLE IF NOT EXISTS watches (
     -- Eigenes Alert-Ziel; leer = über den Bot in `channel_id`.
     webhook_url     TEXT    NOT NULL DEFAULT '',
     -- 'command' = per /watch add angelegt, 'file' = aus searches.toml.
-    origin          TEXT    NOT NULL DEFAULT 'command'
+    origin          TEXT    NOT NULL DEFAULT 'command',
+    -- Gemeinsame Kennung aller Länderkopien einer Suche. Vinted vergibt
+    -- Artikel-IDs länderübergreifend; ohne die würde derselbe Fund von jeder
+    -- Länderkopie einzeln gemeldet.
+    group_key       TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS seen_items (
@@ -46,6 +51,9 @@ CREATE TABLE IF NOT EXISTS seen_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_seen_at ON seen_items(seen_at);
+-- Für die Entdopplung über Watches hinweg: dort wird nach item_id allein
+-- gesucht, der Primärschlüssel (watch_id, item_id) hilft dabei nicht.
+CREATE INDEX IF NOT EXISTS idx_seen_item ON seen_items(item_id);
 CREATE INDEX IF NOT EXISTS idx_watch_guild ON watches(guild_id);
 """
 
@@ -68,6 +76,7 @@ class Watch:
     hits: int
     webhook_url: str = ""
     origin: str = "command"
+    group_key: str = ""
 
     @property
     def query(self) -> SearchQuery:
@@ -97,6 +106,7 @@ class Watch:
             hits=row["hits"],
             webhook_url=row["webhook_url"] or "",
             origin=row["origin"] or "command",
+            group_key=row["group_key"] or "",
         )
 
 
@@ -111,6 +121,10 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._conn: aiosqlite.Connection | None = None
+        # Serialisiert Prüfen-und-Vermerken in `filter_new`. Ohne das könnten
+        # zwei Länderkopien im selben Moment feststellen, dass ein Artikel noch
+        # niemandem aufgefallen ist — und ihn beide melden.
+        self._write_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         try:
@@ -148,9 +162,44 @@ class Database:
         for column, ddl in (
             ("webhook_url", "ALTER TABLE watches ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''"),
             ("origin", "ALTER TABLE watches ADD COLUMN origin TEXT NOT NULL DEFAULT 'command'"),
+            ("group_key", "ALTER TABLE watches ADD COLUMN group_key TEXT NOT NULL DEFAULT ''"),
         ):
             if column not in existing:
                 await self._conn.execute(ddl)
+
+        # Erst hier, nicht im Schema: bei einer Datenbank aus einer älteren
+        # Version gibt es die Spalte vorher noch gar nicht, und ein Index auf
+        # eine fehlende Spalte lässt den Start scheitern.
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_watch_group ON watches(group_key)"
+        )
+        await self._backfill_group_keys()
+
+    async def _backfill_group_keys(self) -> None:
+        """Bestehenden Suchen ihre Gruppenkennung nachtragen.
+
+        Sie lässt sich aus der gespeicherten Abfrage errechnen — ohne das
+        blieben Suchen aus einer älteren Version von der Entdopplung
+        ausgenommen und würden weiter je Land einzeln melden.
+        """
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT id, query_json FROM watches WHERE group_key = ''"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        if not rows:
+            return
+        for row in rows:
+            raw = json.loads(row["query_json"])
+            query = SearchQuery(
+                host=raw["host"],
+                lists=raw.get("lists", {}),
+                scalars=raw.get("scalars", {}),
+            )
+            await self._conn.execute(
+                "UPDATE watches SET group_key = ? WHERE id = ?",
+                (query.group_key(), row["id"]),
+            )
 
     @property
     def conn(self) -> aiosqlite.Connection:
@@ -182,8 +231,9 @@ class Database:
             """
             INSERT INTO watches
                 (guild_id, channel_id, creator_id, name, host, source_url,
-                 query_json, interval, enabled, created_at, webhook_url, origin)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                 query_json, interval, enabled, created_at, webhook_url, origin,
+                 group_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
             """,
             (
                 guild_id,
@@ -197,6 +247,7 @@ class Database:
                 int(time.time()),
                 webhook_url,
                 origin,
+                query.group_key(),
             ),
         )
         await self.conn.commit()
@@ -218,7 +269,7 @@ class Database:
             """
             UPDATE watches
                SET host = ?, source_url = ?, query_json = ?, interval = ?,
-                   webhook_url = ?, enabled = 1
+                   webhook_url = ?, group_key = ?, enabled = 1
              WHERE id = ?
             """,
             (
@@ -227,6 +278,7 @@ class Database:
                 serialize_query(query),
                 interval,
                 webhook_url,
+                query.group_key(),
                 watch_id,
             ),
         )
@@ -316,31 +368,91 @@ class Database:
 
     # ----------------------------------------------------------- Gesehene Items
 
-    async def filter_new(self, watch_id: int, item_ids: list[str]) -> set[str]:
-        """IDs zurückgeben, die für diese Watch noch nie gemeldet wurden.
+    async def _seen_elsewhere(
+        self, watch_id: int, item_ids: list[str], *, scope: str, group_key: str
+    ) -> set[str]:
+        """IDs, die eine **andere** Watch schon gemeldet hat.
 
-        Die IDs werden dabei direkt als gesehen markiert, damit ein Absturz
-        zwischen Prüfung und Versand keine Doppel-Alerts erzeugt.
+        `scope="group"` beschränkt das auf die Länderkopien derselben Suche,
+        `scope="all"` auf sämtliche Suchen.
+        """
+        if not item_ids:
+            return set()
+        placeholders = ",".join("?" for _ in item_ids)
+
+        if scope == "group":
+            if not group_key:
+                return set()
+            sql = (
+                "SELECT s.item_id FROM seen_items s "
+                "JOIN watches w ON w.id = s.watch_id "
+                f"WHERE w.group_key = ? AND s.watch_id != ? AND s.item_id IN ({placeholders})"
+            )
+            args: tuple[object, ...] = (group_key, watch_id, *item_ids)
+        else:
+            sql = (
+                "SELECT item_id FROM seen_items "
+                f"WHERE watch_id != ? AND item_id IN ({placeholders})"
+            )
+            args = (watch_id, *item_ids)
+
+        async with self.conn.execute(sql, args) as cursor:
+            return {row["item_id"] for row in await cursor.fetchall()}
+
+    async def filter_new(
+        self,
+        watch_id: int,
+        item_ids: list[str],
+        *,
+        scope: str = "watch",
+        group_key: str = "",
+    ) -> set[str]:
+        """IDs zurückgeben, die gemeldet werden sollen.
+
+        Neu für diese Watch sind sie in jedem Fall, und sie werden sofort als
+        gesehen vermerkt — ein Absturz zwischen Prüfung und Versand darf keine
+        Doppel-Alerts erzeugen.
+
+        Bei `scope="group"` oder `"all"` fallen zusätzlich die IDs weg, die
+        eine andere Watch bereits gemeldet hat: Vinted vergibt Artikel-IDs
+        länderübergreifend, ohne das meldet jede Länderkopie denselben Fund.
+        Vermerkt bleiben sie trotzdem — sonst hielte sich diese Watch nach
+        einem Neustart für ungeprimed und würde eine Runde stumm schlucken.
+
+        Die Sperre serialisiert Prüfen und Vermerken. Zwei Länderkopien, die
+        im selben Moment abfragen, würden sonst beide „noch niemand hat's
+        gemeldet" sehen und beide alerten.
         """
         if not item_ids:
             return set()
 
-        placeholders = ",".join("?" for _ in item_ids)
-        async with self.conn.execute(
-            f"SELECT item_id FROM seen_items WHERE watch_id = ? AND item_id IN ({placeholders})",
-            (watch_id, *item_ids),
-        ) as cursor:
-            known = {row["item_id"] for row in await cursor.fetchall()}
+        async with self._write_lock:
+            placeholders = ",".join("?" for _ in item_ids)
+            async with self.conn.execute(
+                f"SELECT item_id FROM seen_items WHERE watch_id = ? "
+                f"AND item_id IN ({placeholders})",
+                (watch_id, *item_ids),
+            ) as cursor:
+                known = {row["item_id"] for row in await cursor.fetchall()}
 
-        fresh = [item_id for item_id in item_ids if item_id not in known]
-        if fresh:
+            fresh = [item_id for item_id in item_ids if item_id not in known]
+            if not fresh:
+                return set()
+
+            anderswo: set[str] = set()
+            if scope in ("group", "all"):
+                anderswo = await self._seen_elsewhere(
+                    watch_id, fresh, scope=scope, group_key=group_key
+                )
+
             now = int(time.time())
             await self.conn.executemany(
                 "INSERT OR IGNORE INTO seen_items (watch_id, item_id, seen_at) VALUES (?, ?, ?)",
                 [(watch_id, item_id, now) for item_id in fresh],
             )
             await self.conn.commit()
-        return set(fresh)
+
+        return {item_id for item_id in fresh if item_id not in anderswo}
 
     async def has_seen_any(self, watch_id: int) -> bool:
         """Hat diese Watch schon einmal Artikel erfasst?

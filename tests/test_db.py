@@ -348,6 +348,13 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(watches[0].name, "Alt")
                 self.assertEqual(watches[0].webhook_url, "")
                 self.assertEqual(watches[0].origin, "command")
+                # Die Gruppenkennung wird aus der gespeicherten Abfrage
+                # nachgetragen — sonst bliebe die Suche von der Entdopplung
+                # ausgenommen und meldete weiter je Land einzeln.
+                self.assertEqual(
+                    watches[0].group_key,
+                    watches[0].query.group_key(),
+                )
             finally:
                 await db.close()
 
@@ -372,6 +379,104 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
                 await db.connect()
                 await db.close()
             self.assertTrue(path.exists())
+
+
+class DedupeTests(DatabaseTestCase):
+    """Derselbe Artikel darf nicht von jeder Länderkopie gemeldet werden.
+
+    Vinted vergibt Artikel-IDs länderübergreifend — ohne Entdopplung liefert
+    eine Suche in sieben Ländern sieben Alerts für denselben Fund.
+    """
+
+    URL = "https://www.vinted.de/catalog?search_text=nike&price_to=40"
+
+    async def anlegen(self, host, *, name=None, text="nike"):
+        query = parse_search_url(f"https://{host}/catalog?search_text={text}&price_to=40")
+        return await self.db.add_watch(
+            guild_id=1,
+            channel_id=2,
+            creator_id=3,
+            name=name or host,
+            query=query,
+            source_url=query.web_url(),
+            interval=60,
+        )
+
+    async def test_gruppenkennung_ist_ueber_laender_hinweg_gleich(self):
+        de = await self.anlegen("www.vinted.de")
+        fr = await self.anlegen("www.vinted.fr")
+        self.assertNotEqual(de.group_key, "")
+        self.assertEqual(de.group_key, fr.group_key)
+
+    async def test_andere_suche_hat_eine_andere_kennung(self):
+        de = await self.anlegen("www.vinted.de")
+        andere = await self.anlegen("www.vinted.de", text="carhartt", name="Carhartt")
+        self.assertNotEqual(de.group_key, andere.group_key)
+
+    async def test_zweites_land_meldet_denselben_artikel_nicht_nochmal(self):
+        de = await self.anlegen("www.vinted.de")
+        fr = await self.anlegen("www.vinted.fr")
+
+        erste = await self.db.filter_new(de.id, ["1", "2"], scope="group",
+                                         group_key=de.group_key)
+        self.assertEqual(erste, {"1", "2"})
+
+        zweite = await self.db.filter_new(fr.id, ["1", "2", "3"], scope="group",
+                                          group_key=fr.group_key)
+        self.assertEqual(zweite, {"3"}, "1 und 2 hat Deutschland schon gemeldet")
+
+    async def test_vermerkt_wird_trotzdem(self):
+        # Unterdrückte IDs müssen für die Watch gespeichert sein, sonst hält sie
+        # sich nach einem Neustart für ungeprimed und schluckt eine Runde.
+        de = await self.anlegen("www.vinted.de")
+        fr = await self.anlegen("www.vinted.fr")
+        await self.db.filter_new(de.id, ["1"], scope="group", group_key=de.group_key)
+        await self.db.filter_new(fr.id, ["1"], scope="group", group_key=fr.group_key)
+        self.assertTrue(await self.db.has_seen_any(fr.id))
+
+    async def test_gruppe_schaltet_fremde_suchen_nicht_stumm(self):
+        de = await self.anlegen("www.vinted.de")
+        andere = await self.anlegen("www.vinted.de", text="carhartt", name="Carhartt")
+        await self.db.filter_new(de.id, ["1"], scope="group", group_key=de.group_key)
+        neu = await self.db.filter_new(andere.id, ["1"], scope="group",
+                                       group_key=andere.group_key)
+        self.assertEqual(neu, {"1"})
+
+    async def test_scope_all_schaltet_alles_stumm(self):
+        de = await self.anlegen("www.vinted.de")
+        andere = await self.anlegen("www.vinted.de", text="carhartt", name="Carhartt")
+        await self.db.filter_new(de.id, ["1"], scope="all")
+        self.assertEqual(await self.db.filter_new(andere.id, ["1"], scope="all"), set())
+
+    async def test_scope_watch_ist_das_alte_verhalten(self):
+        de = await self.anlegen("www.vinted.de")
+        fr = await self.anlegen("www.vinted.fr")
+        await self.db.filter_new(de.id, ["1"], scope="watch", group_key=de.group_key)
+        neu = await self.db.filter_new(fr.id, ["1"], scope="watch", group_key=fr.group_key)
+        self.assertEqual(neu, {"1"})
+
+    async def test_dieselbe_watch_meldet_nie_doppelt(self):
+        de = await self.anlegen("www.vinted.de")
+        await self.db.filter_new(de.id, ["1"], scope="group", group_key=de.group_key)
+        neu = await self.db.filter_new(de.id, ["1"], scope="group", group_key=de.group_key)
+        self.assertEqual(neu, set())
+
+    async def test_leere_kennung_entdoppelt_nicht(self):
+        # Sicherheitsnetz: ohne Kennung darf nicht versehentlich alles als eine
+        # große Gruppe behandelt werden.
+        de = await self.anlegen("www.vinted.de")
+        fr = await self.anlegen("www.vinted.fr")
+        await self.db.filter_new(de.id, ["1"], scope="group", group_key="")
+        self.assertEqual(
+            await self.db.filter_new(fr.id, ["1"], scope="group", group_key=""), {"1"}
+        )
+
+    async def test_leere_liste(self):
+        de = await self.anlegen("www.vinted.de")
+        self.assertEqual(
+            await self.db.filter_new(de.id, [], scope="group", group_key=de.group_key),
+            set(),
+        )
 
 
 if __name__ == "__main__":

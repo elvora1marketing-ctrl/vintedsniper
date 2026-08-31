@@ -267,9 +267,13 @@ zu werden.
 
 Zwei Dinge, die dabei wichtig sind:
 
-- **Jedes Land bekommt einen eigenen Bestand.** Sonst würde ein Fund in Italien
-  den identischen Fund in Frankreich verschlucken. Derselbe Artikel in zwei
-  Ländern meldet also zweimal — das ist Absicht.
+- **Jeder Artikel wird trotzdem nur einmal gemeldet.** Vinted vergibt
+  Artikel-IDs länderübergreifend: derselbe Artikel hat auf `.de` und `.fr`
+  dieselbe ID, und ohne Gegenmaßnahme meldete ihn jede Länderkopie einzeln —
+  bei sieben Ländern also siebenmal. Alle Kopien einer Suche teilen deshalb
+  eine Kennung und einen gemeinsamen Merkzettel; wer zuerst hinschaut, meldet.
+  Über `DEDUPE_SCOPE` lässt sich das auf **alle** Suchen ausweiten (`all`) oder
+  abschalten (`watch`).
 - **Preisfilter hängen an der Währung.** Kategorie-, Marken- und Größen-IDs
   sind bei Vinted länderübergreifend dieselben, die Währung nicht. Geht eine
   Suche mit Preisgrenze nach Polen oder Großbritannien, wird die ursprüngliche
@@ -413,6 +417,7 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `PANEL_DOMAIN` | — | Domain fürs Panel. Nur für den mitgelieferten Caddy (`--profile standalone`); ein vorhandener Reverse-Proxy kennt seine Domain selbst. |
 | `PANEL_PORT` | `8080` | Port auf `127.0.0.1` des Hosts. Nur bei Konflikten ändern. |
 | `EXTRA_COUNTRIES` | — | Länder, in denen **jede** Suche zusätzlich läuft, z. B. `fr,nl,it`. Leer = nur die Domain aus der Such-URL. |
+| `DEDUPE_SCOPE` | `group` | Wie weit ein gemeldeter Artikel andere Suchen stummschaltet: `group` = die Länderkopien derselben Suche, `all` = jede Suche, `watch` = gar nicht. |
 | `ALERT_RETENTION_HOURS` | `0` | Alerts, die älter sind, werden automatisch gelöscht. `0` = aus. |
 | `CLEANUP_CHANNELS` | — | Channel-IDs zum Aufräumen. Leer = die Channels, in die der Bot selbst alertet. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |

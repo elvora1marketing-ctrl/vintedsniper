@@ -131,7 +131,12 @@ class Monitor:
                 consecutive_errors = 0
                 notified_trouble = False
 
-                new_ids = await self.db.filter_new(watch_id, [item.id for item in items])
+                new_ids = await self.db.filter_new(
+                    watch_id,
+                    [item.id for item in items],
+                    scope=self.settings.dedupe_scope,
+                    group_key=watch.group_key,
+                )
 
                 if not primed:
                     # Erster Durchlauf: nur den Ist-Zustand einlesen. Sonst
