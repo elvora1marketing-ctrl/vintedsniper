@@ -571,6 +571,8 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `IMPERSONATE` | `chrome124` | Browser-Profil für die TLS-Impersonation. |
 | `PROXIES` | — | Komma-getrennte Proxy-Liste für wenige Einträge. |
 | `PROXIES_FILE` | `proxies.txt` | Datei mit einer Proxy-Zeile je Zeile — für große Anbieterlisten. |
+| `PROXIES_TEMPLATE` | — | Vorlage für durchnummerierte Sitzungen, z. B. `p.webshare.io:80:user-DE-{n}:pw`. |
+| `PROXIES_SESSIONS` | `0` | Wie viele Sitzungen aus der Vorlage erzeugt werden (`{n}` = 1 … n). |
 | `PLAYWRIGHT_FALLBACK` | `true` | Headless-Chromium als Notnagel bei Challenges. |
 | `RATE_LIMIT_PER_DOMAIN` | `60` | Requests pro Minute und Domain über alle Suchen. |
 | `REQUEST_TIMEOUT` | `20` | Sekunden bis Abbruch einer Anfrage. |

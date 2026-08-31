@@ -86,18 +86,26 @@ class VintedSession:
     """Eine wiederverwendbare, selbstheilende Session für genau einen Host."""
 
     BASE_ATTEMPTS = 4
+    # Obergrenze je Abfrage. Ohne die würde eine Liste mit tausenden Sitzungen
+    # jeden einzelnen Eintrag durchprobieren, bevor sie aufgibt: eine einzige
+    # Suche hinge dann minutenlang und feuerte dabei tausende Requests. Wenn
+    # zehn hintereinander scheitern, liegt es ohnehin nicht am Proxy.
+    MAX_ATTEMPTS = 10
     # Ruhezeit, nachdem eine IP-Sperre festgestellt wurde.
     IP_BLOCK_COOLDOWN = 600.0
 
     @property
     def max_attempts(self) -> int:
-        """Genug Versuche, um jeden Proxy einmal durchzuprobieren.
+        """Genug Versuche, um mehrere Proxys durchzuprobieren — aber nicht alle.
 
-        Mit vier festen Versuchen käme bei fünf hinterlegten Proxies nie die
-        ganze Liste dran — der Bot würde aufgeben, obwohl ein funktionierender
-        Ausgang noch ungenutzt in der Liste steht.
+        Mit vier festen Versuchen käme bei fünf hinterlegten Proxys nie die
+        ganze Liste dran. Bei viertausend darf aber auch nicht die ganze Liste
+        drankommen, deshalb der Deckel.
         """
-        return max(self.BASE_ATTEMPTS, len(self.settings.proxies) + 1)
+        return max(
+            self.BASE_ATTEMPTS,
+            min(len(self.settings.proxies) + 1, self.MAX_ATTEMPTS),
+        )
 
     def __init__(self, host: str, settings: Settings) -> None:
         self.host = host
@@ -106,8 +114,13 @@ class VintedSession:
 
         self._session: AsyncSession | None = None
         self._lock = asyncio.Lock()
+        # Zufälliger Startpunkt statt immer Proxy #1: sonst gingen alle Suchen
+        # über dieselbe IP los, und die tausend anderen Sitzungen brächten
+        # genau nichts.
+        self._proxy_index = (
+            random.randrange(len(settings.proxies)) if settings.proxies else 0
+        )
         self._bootstrapped_at = 0.0
-        self._proxy_index = 0
         self._consecutive_blocks = 0
         self._playwright_available = settings.playwright_fallback
         self._limiter = RateLimiter(settings.rate_limit_per_domain)

@@ -49,13 +49,53 @@ def parse_proxy_line(line: str) -> str | None:
     return None
 
 
-def load_proxies(*, inline: str, path: Path | None) -> list[str]:
-    """Proxys aus `PROXIES` und `PROXIES_FILE` zusammenführen.
+# Mehr als das ist kein Vorrat mehr, sondern ein Fehler in der Konfiguration —
+# und würde beim Start unnötig Speicher und Logzeilen kosten.
+MAX_SESSIONS = 20_000
+
+
+def expand_template(template: str, count: int) -> list[str]:
+    """Aus einer Vorlage mit `{n}` durchnummerierte Sitzungen erzeugen.
+
+    Anbieter wie Webshare vergeben keine Proxy-Liste, sondern eine
+    Sitzungskennung: `benutzer-DE-1`, `benutzer-DE-2`, … Jede Nummer bekommt
+    eine eigene IP aus demselben Pool. Diese Zeilen unterscheiden sich also nur
+    in einer Zahl — sie als Datei mit tausenden Zeilen zu pflegen, ist unnötig.
+
+    `p.webshare.io:80:benutzer-DE-{n}:passwort` mit `count=4577` ergibt genau
+    die Liste, die man sonst abtippt.
+    """
+    if not template or count <= 0:
+        return []
+    if "{n}" not in template:
+        log.error(
+            "PROXIES_TEMPLATE enthält kein {n} — ohne die Nummer wären alle "
+            "Einträge identisch. Beispiel: host:port:benutzer-DE-{n}:passwort"
+        )
+        return []
+    if count > MAX_SESSIONS:
+        log.warning(
+            "PROXIES_SESSIONS=%d ist unplausibel hoch, begrenze auf %d.",
+            count,
+            MAX_SESSIONS,
+        )
+        count = MAX_SESSIONS
+    return [template.replace("{n}", str(nummer)) for nummer in range(1, count + 1)]
+
+
+def load_proxies(
+    *,
+    inline: str,
+    path: Path | None,
+    template: str = "",
+    sessions: int = 0,
+) -> list[str]:
+    """Proxys aus `PROXIES`, `PROXIES_FILE` und der Sitzungsvorlage zusammenführen.
 
     Doppelte Einträge fliegen raus, die Reihenfolge bleibt erhalten — der Bot
     arbeitet die Liste bei Blockaden der Reihe nach ab.
     """
-    lines: list[str] = []
+    lines: list[str] = list(expand_template(template, sessions))
 
     for chunk in inline.replace("\n", ",").split(","):
         lines.append(chunk)

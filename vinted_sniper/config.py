@@ -289,6 +289,8 @@ class Settings:
             proxies=load_proxies(
                 inline=os.getenv("PROXIES", ""),
                 path=Path(os.getenv("PROXIES_FILE", "proxies.txt")),
+                template=os.getenv("PROXIES_TEMPLATE", "").strip(),
+                sessions=_int("PROXIES_SESSIONS", 0),
             ),
             playwright_fallback=_bool("PLAYWRIGHT_FALLBACK", True),
             request_timeout=_float("REQUEST_TIMEOUT", 20.0),

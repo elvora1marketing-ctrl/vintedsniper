@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from vinted_sniper import proxies
 from vinted_sniper.proxies import load_proxies, parse_proxy_line
 
 
@@ -116,6 +117,56 @@ class LoadProxiesTests(unittest.TestCase):
             )
             proxies = load_proxies(inline="", path=path)
         self.assertEqual(len(proxies), 1000)
+
+
+class ExpandTemplateTests(unittest.TestCase):
+    """Sitzungsvorlage: 4577 Zeilen, die sich nur in einer Zahl unterscheiden,
+    schreibt niemand ab."""
+
+    VORLAGE = "p.webshare.io:80:ckrgzvap-DE-{n}:geheim"
+
+    def test_durchnummeriert_ab_eins(self):
+        liste = proxies.expand_template(self.VORLAGE, 3)
+        self.assertEqual(liste, [
+            "p.webshare.io:80:ckrgzvap-DE-1:geheim",
+            "p.webshare.io:80:ckrgzvap-DE-2:geheim",
+            "p.webshare.io:80:ckrgzvap-DE-3:geheim",
+        ])
+
+    def test_grosse_liste(self):
+        self.assertEqual(len(proxies.expand_template(self.VORLAGE, 4577)), 4577)
+
+    def test_ohne_platzhalter_lieber_nichts(self):
+        # Alle Einträge wären identisch — das ist nie gewollt und sähe im
+        # Betrieb aus wie „ein Proxy", nicht wie ein Fehler.
+        self.assertEqual(proxies.expand_template("host:80:user:pw", 100), [])
+
+    def test_null_oder_negativ(self):
+        self.assertEqual(proxies.expand_template(self.VORLAGE, 0), [])
+        self.assertEqual(proxies.expand_template(self.VORLAGE, -5), [])
+
+    def test_leere_vorlage(self):
+        self.assertEqual(proxies.expand_template("", 10), [])
+
+    def test_obergrenze(self):
+        liste = proxies.expand_template(self.VORLAGE, proxies.MAX_SESSIONS + 500)
+        self.assertEqual(len(liste), proxies.MAX_SESSIONS)
+
+    def test_wird_in_urls_uebersetzt(self):
+        geladen = proxies.load_proxies(
+            inline="", path=None, template=self.VORLAGE, sessions=2
+        )
+        self.assertEqual(geladen[0], "http://ckrgzvap-DE-1:geheim@p.webshare.io:80")
+        self.assertEqual(len(geladen), 2)
+
+    def test_vorlage_und_datei_ergaenzen_sich(self):
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".txt") as handle:
+            handle.write("1.2.3.4:8080\n")
+            pfad = Path(handle.name)
+        geladen = proxies.load_proxies(
+            inline="", path=pfad, template=self.VORLAGE, sessions=2
+        )
+        self.assertEqual(len(geladen), 3)
 
 
 if __name__ == "__main__":
