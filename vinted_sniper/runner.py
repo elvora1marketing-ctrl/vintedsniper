@@ -11,6 +11,10 @@ import asyncio
 import datetime as dt
 import logging
 
+import discord
+
+from . import embeds
+
 from .config import Settings
 from .db import Database, DatabaseUnavailable
 from .monitor import Monitor
@@ -19,6 +23,7 @@ from .panel.app import PanelServer
 from .profiles import InvalidProfileFile, load_profiles
 from .searches import InvalidSearchFile, load_searches, sync_to_db
 from .vinted.client import VintedClient
+from .watchdog import Watchdog
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +60,7 @@ async def run_webhook_mode(settings: Settings) -> int:
         log.error("%s", exc)
         return 1
 
+    watchdog = Watchdog(settings, db, send=lambda *_: asyncio.sleep(0))
     client = VintedClient(settings)
     notifier = WebhookNotifier()
     monitor = Monitor(
@@ -89,6 +95,25 @@ async def run_webhook_mode(settings: Settings) -> int:
             # das wüsste er erst beim ersten Treffer, ob überhaupt etwas ankommt.
             await notifier.send_startup(settings.alert_webhook_url, watches)
 
+        async def melde_zustand(titel: str, text: str, alarm: bool) -> None:
+            """Ausfallmeldung über den Webhook — mit Erwähnung, wenn es ernst ist."""
+            if not settings.alert_webhook_url:
+                log.error("Ausfallmeldung „%s“ ohne Ziel: %s", titel, text)
+                return
+            await notifier.send_health(
+                settings.alert_webhook_url,
+                discord.Embed(
+                    title=titel,
+                    description=text,
+                    color=embeds.WARN_ORANGE if alarm else embeds.OK_GREEN,
+                ),
+                settings.alert_mention if alarm else "",
+            )
+
+        watchdog = Watchdog(settings, db, send=melde_zustand)
+        await watchdog.report_downtime()
+        watchdog.start()
+
         await panel.start()
         monitor.profiles = profile
         started = await monitor.start_all()
@@ -100,6 +125,7 @@ async def run_webhook_mode(settings: Settings) -> int:
     except asyncio.CancelledError:
         log.info("Abbruch empfangen.")
     finally:
+        watchdog.stop()
         await monitor.shutdown()
         await panel.close()
         await notifier.close()

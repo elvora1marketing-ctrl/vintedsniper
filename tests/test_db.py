@@ -533,5 +533,35 @@ class PriceSampleTests(DatabaseTestCase):
         self.assertEqual(await self.db.recent_prices("g", "EUR"), [10.0])
 
 
+class HeartbeatTests(DatabaseTestCase):
+    """Das Lebenszeichen — daran erkennt der Sniper nach einem Absturz, wie
+    lange er weg war."""
+
+    async def test_beim_ersten_start_gibt_es_keins(self):
+        self.assertIsNone(await self.db.last_heartbeat())
+
+    async def test_setzen_und_lesen(self):
+        await self.db.touch_heartbeat()
+        import time
+        self.assertAlmostEqual(await self.db.last_heartbeat(), int(time.time()), delta=2)
+
+    async def test_ueberschreiben_statt_anhaeufen(self):
+        await self.db.touch_heartbeat()
+        await self.db.touch_heartbeat()
+        async with self.db.conn.execute("SELECT COUNT(*) AS n FROM meta") as cursor:
+            row = await cursor.fetchone()
+        self.assertEqual(row["n"], 1)
+
+    async def test_muell_wird_nicht_als_zeitstempel_gelesen(self):
+        await self.db.set_meta("heartbeat", "irgendwas")
+        self.assertIsNone(await self.db.last_heartbeat())
+
+    async def test_meta_allgemein(self):
+        self.assertIsNone(await self.db.get_meta("x"))
+        await self.db.set_meta("x", "eins")
+        await self.db.set_meta("x", "zwei")
+        self.assertEqual(await self.db.get_meta("x"), "zwei")
+
+
 if __name__ == "__main__":
     unittest.main()

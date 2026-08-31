@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS price_samples (
 CREATE INDEX IF NOT EXISTS idx_price_lookup
     ON price_samples(group_key, currency, seen_at);
 
+-- Kleiner Schlüssel-Wert-Speicher für Betriebszustand, allen voran das
+-- Lebenszeichen. Nach einem Absturz lässt sich daran ablesen, wie lange der
+-- Sniper weg war — der Prozess selbst weiß das nach dem Neustart nicht mehr.
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_seen_at ON seen_items(seen_at);
 -- Für die Entdopplung über Watches hinweg: dort wird nach item_id allein
 -- gesucht, der Primärschlüssel (watch_id, item_id) hilft dabei nicht.
@@ -469,6 +477,37 @@ class Database:
             await self.conn.commit()
 
         return {item_id for item_id in fresh if item_id not in anderswo}
+
+    # ------------------------------------------------------- Betriebszustand
+
+    async def set_meta(self, key: str, value: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        await self.conn.commit()
+
+    async def get_meta(self, key: str) -> str | None:
+        async with self.conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row["value"] if row else None
+
+    async def touch_heartbeat(self) -> None:
+        await self.set_meta("heartbeat", str(int(time.time())))
+
+    async def last_heartbeat(self) -> int | None:
+        """Wann der Sniper zuletzt gelebt hat.
+
+        `None` beim allerersten Start — dann gab es keine Lücke, sondern nur
+        noch keinen Betrieb.
+        """
+        roh = await self.get_meta("heartbeat")
+        if roh is None or not roh.isdigit():
+            return None
+        return int(roh)
 
     # -------------------------------------------------------------- Preise
 

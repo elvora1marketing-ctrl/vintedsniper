@@ -19,6 +19,7 @@ from ..panel.app import PanelServer
 from ..profiles import InvalidProfileFile, load_profiles
 from ..searches import InvalidSearchFile, load_searches, sync_to_db
 from ..vinted.client import VintedClient
+from ..watchdog import Watchdog
 from ..vinted.models import Item
 
 log = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ class SniperBot(commands.Bot):
             started_at=self.started_at,
             default_countries=settings.extra_countries,
         )
+        self.watchdog = Watchdog(settings, self.db, send=self._deliver_health)
         self._send_lock = asyncio.Lock()
         self._cleanup_task: asyncio.Task[None] | None = None
         # `on_ready` feuert auch nach jedem Reconnect — der Startlauf darf aber
@@ -184,6 +186,9 @@ class SniperBot(commands.Bot):
         started = await self.monitor.start_all()
         log.info("%d gespeicherte Suchen gestartet.", started)
 
+        await self.watchdog.report_downtime()
+        self.watchdog.start()
+
         if self.settings.alert_retention_hours:
             self._cleanup_task = self.loop.create_task(self._cleanup_loop())
 
@@ -252,7 +257,56 @@ class SniperBot(commands.Bot):
                 log.exception("Aufräumen fehlgeschlagen.")
             await asyncio.sleep(CLEANUP_EVERY)
 
+    async def _health_target(self) -> discord.abc.Messageable | None:
+        """Wohin Ausfallmeldungen gehen.
+
+        Fest eingestellter Channel, sonst der einer beliebigen Suche. Wichtig
+        ist, dass es überhaupt ein Ziel gibt: eine Ausfallmeldung, die niemand
+        sieht, ist wertlos.
+        """
+        if self.settings.health_channel_id:
+            return await self._resolve_channel(self.settings.health_channel_id)
+        for watch in await self.db.list_watches():
+            if watch.channel_id and not watch.webhook_url:
+                return await self._resolve_channel(watch.channel_id)
+        return None
+
+    async def _deliver_health(self, titel: str, text: str, alarm: bool) -> None:
+        """Ausfallmeldung zustellen — mit Erwähnung, wenn es ernst ist."""
+        embed = discord.Embed(
+            title=titel,
+            description=text,
+            color=embeds.WARN_ORANGE if alarm else embeds.OK_GREEN,
+            timestamp=dt.datetime.now(dt.timezone.utc),
+        )
+        erwaehnung = self.settings.alert_mention if alarm else ""
+
+        channel = await self._health_target()
+        if channel is not None:
+            await channel.send(
+                content=erwaehnung or None,
+                embed=embed,
+                # Ohne das ignoriert Discord die Erwähnung stillschweigend.
+                allowed_mentions=discord.AllowedMentions(
+                    users=True, roles=True, everyone=True
+                ),
+            )
+            return
+
+        if self.settings.alert_webhook_url:
+            await self.webhooks.send_health(
+                self.settings.alert_webhook_url, embed, erwaehnung
+            )
+            return
+
+        log.error(
+            "Ausfallmeldung „%s“ konnte nirgends zugestellt werden: weder "
+            "HEALTH_CHANNEL noch ALERT_WEBHOOK_URL ist gesetzt.",
+            titel,
+        )
+
     async def close(self) -> None:
+        self.watchdog.stop()
         if self._cleanup_task is not None:
             self._cleanup_task.cancel()
         await self.monitor.shutdown()

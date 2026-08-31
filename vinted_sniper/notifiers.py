@@ -134,6 +134,25 @@ class WebhookNotifier:
             ),
         )
 
+    async def send_health(
+        self, url: str, embed: discord.Embed, mention: str = ""
+    ) -> None:
+        """Ausfallmeldung, bei Bedarf mit Erwähnung.
+
+        `allowed_mentions` muss ausdrücklich gesetzt werden — sonst schluckt
+        Discord die Erwähnung, die Nachricht kommt an und pingt niemanden. Bei
+        einem Ausfall ist genau das der Fehler, den man nicht merkt.
+        """
+        webhook = await self._webhook_for(url)
+        await self._safe_send(
+            webhook,
+            content=mention or None,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                users=True, roles=True, everyone=True
+            ),
+        )
+
     async def _safe_send(self, webhook: discord.Webhook, **kwargs: object) -> None:
         try:
             await webhook.send(username="Vinted Sniper", **kwargs)  # type: ignore[arg-type]

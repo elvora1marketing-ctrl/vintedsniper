@@ -66,6 +66,35 @@ def _words(name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(wort for wort in werte if wort))
 
 
+def _mention(name: str) -> str:
+    """Erwähnung für Ausfallmeldungen aufbereiten.
+
+    Discord pingt nur über die Benutzer-ID, nicht über den Namen. Reine Zahlen
+    werden deshalb zu `<@id>` gemacht; alles andere (`@here`, eine fertige
+    Rollen-Erwähnung) bleibt, wie es ist. Mehrere durch Komma trennen.
+    """
+    roh = os.getenv(name, "").strip()
+    if not roh:
+        return ""
+    teile: list[str] = []
+    for eintrag in roh.replace(",", " ").split():
+        if eintrag.isdigit():
+            teile.append(f"<@{eintrag}>")
+        elif eintrag.startswith("@") and eintrag[1:].isdigit():
+            teile.append(f"<@{eintrag[1:]}>")
+        else:
+            if eintrag.startswith("@") and eintrag not in ("@here", "@everyone"):
+                log.warning(
+                    "%s=%r: Discord pingt nicht über den Namen, sondern über die "
+                    "Benutzer-ID. Entwicklermodus einschalten, Rechtsklick auf "
+                    "den Namen → „ID kopieren“, und die Zahl hier eintragen.",
+                    name,
+                    eintrag,
+                )
+            teile.append(eintrag)
+    return " ".join(teile)
+
+
 def _choice(name: str, default: str, erlaubt: tuple[str, ...]) -> str:
     roh = os.getenv(name, "").strip().lower()
     if not roh:
@@ -138,6 +167,22 @@ class Settings:
     # `group` = nur die Länderkopien derselben Suche (Standard), `all` = jede
     # Suche, `watch` = gar nicht, jede Suche meldet für sich.
     dedupe_scope: str
+
+    # --- Überwachung ---
+    # Wen der Bot bei einem Ausfall anpingt. Roh übernommen, damit auch
+    # `@here` oder eine Rolle möglich ist.
+    alert_mention: str
+    # Channel für Ausfallmeldungen. Leer = der Channel der ersten Suche bzw.
+    # das Webhook-Ziel.
+    health_channel_id: int
+    # Ab wann eine Suche als „meldet nichts mehr" gilt (Sekunden).
+    health_stale_after: float
+    # Abstand zwischen zwei Prüfungen (Sekunden).
+    health_every: float
+    # Totmannschalter: URL, die regelmäßig angepingt wird. Bleibt der Ping aus,
+    # schlägt der fremde Dienst Alarm — das ist der einzige Weg, einen toten
+    # Server zu bemerken. Leer = aus.
+    heartbeat_url: str
 
     # --- Aufräumen ---
     # Alerts älter als das werden automatisch gelöscht. 0 = aus.
@@ -222,6 +267,11 @@ class Settings:
             panel_port=_int("PANEL_PORT", 8080),
             extra_countries=_countries("EXTRA_COUNTRIES"),
             dedupe_scope=_choice("DEDUPE_SCOPE", "group", ("group", "all", "watch")),
+            alert_mention=_mention("ALERT_MENTION"),
+            health_channel_id=_int("HEALTH_CHANNEL", 0),
+            health_stale_after=max(60.0, _float("HEALTH_STALE_AFTER", 900.0)),
+            health_every=max(60.0, _float("HEALTH_EVERY", 300.0)),
+            heartbeat_url=os.getenv("HEARTBEAT_URL", "").strip(),
             alert_retention_hours=max(0, _int("ALERT_RETENTION_HOURS", 0)),
             cleanup_channel_ids=_ids("CLEANUP_CHANNELS"),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),

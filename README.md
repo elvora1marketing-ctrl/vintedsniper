@@ -187,6 +187,50 @@ Panel auslösen, während du angemeldet bist.
 
 ---
 
+## Merken, wenn der Sniper ausfällt
+
+Ein Sniper, der still ausfällt, ist schlimmer als keiner: man verlässt sich auf
+ihn und merkt tagelang nicht, dass nichts mehr kommt. Drei Stufen decken
+unterschiedliche Ausfälle ab — **keine einzelne deckt alle ab**.
+
+```
+ALERT_MENTION=123456789012345678
+```
+
+Das ist deine Discord-Benutzer-ID, nicht dein Name: Einstellungen → Erweitert →
+Entwicklermodus einschalten, dann Rechtsklick auf deinen Namen →
+*Benutzer-ID kopieren*. Über den Namen pingt Discord nicht.
+
+**Stufe 1 — die Suchen hängen.** Der Prozess läuft, aber keine Abfrage kommt
+mehr durch: Proxy-Kontingent leer, IP gesperrt, Vinted hat etwas geändert. Der
+Bot prüft das alle fünf Minuten und meldet es mit Erwähnung. Geprüft wird nicht
+nur auf Fehler, sondern auch auf Schweigen — eine Suche, die gar nicht mehr
+durchläuft, setzt nämlich auch keinen Fehler. Gepingt wird nur, wenn **alle**
+Suchen betroffen sind; eine einzelne hakende meldet der Monitor ohnehin.
+
+**Stufe 2 — der Prozess war weg.** Absturz, Neustart, Server rebootet. Der
+Sniper schreibt jede Minute ein Lebenszeichen in die Datenbank und vergleicht
+es beim Start mit der Uhr. War er länger als drei Minuten weg, meldet er die
+Lücke mit Dauer.
+
+**Stufe 3 — der Server ist aus.** Das kann der Bot grundsätzlich nicht melden,
+er läuft ja nicht. Dafür der Totmannschalter: er pingt jede Minute eine fremde
+URL an, und *das Ausbleiben* dieses Pings löst dort den Alarm aus.
+
+```
+HEARTBEAT_URL=https://hc-ping.com/dein-schluessel
+```
+
+Kostenlos mit [healthchecks.io](https://healthchecks.io): Konto anlegen, *Add
+Check*, Periode 5 Minuten, Grace 5 Minuten, Ping-URL hier eintragen. Unter
+*Integrations* Discord verbinden — dann schreibt der Dienst selbst in deinen
+Channel, auch wenn dein Server komplett aus ist.
+
+Ohne Stufe 3 bleibt genau ein Ausfall unbemerkt: der, bei dem nichts mehr läuft,
+was reden könnte. Die fünf Minuten Einrichtung lohnen sich.
+
+---
+
 ## Befehle (nur Bot-Modus)
 
 | Befehl | Wirkung |
@@ -497,6 +541,11 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `PANEL_PORT` | `8080` | Port auf `127.0.0.1` des Hosts. Nur bei Konflikten ändern. |
 | `EXTRA_COUNTRIES` | — | Länder, in denen **jede** Suche zusätzlich läuft, z. B. `fr,nl,it`. Leer = nur die Domain aus der Such-URL. |
 | `DEDUPE_SCOPE` | `group` | Wie weit ein gemeldeter Artikel andere Suchen stummschaltet: `group` = die Länderkopien derselben Suche, `all` = jede Suche, `watch` = gar nicht. |
+| `ALERT_MENTION` | — | Wer bei einem Ausfall angepingt wird. Benutzer-IDs, komma-getrennt, oder `@here`. |
+| `HEALTH_CHANNEL` | — | Channel-ID für Ausfallmeldungen. Leer = Channel der ersten Suche bzw. Webhook. |
+| `HEALTH_STALE_AFTER` | `900` | Ab wann eine Suche als „meldet nichts mehr" gilt (Sekunden). |
+| `HEALTH_EVERY` | `300` | Abstand zwischen zwei Zustandsprüfungen (Sekunden). |
+| `HEARTBEAT_URL` | — | Totmannschalter: URL, die jede Minute angepingt wird. Bleibt der Ping aus, meldet der fremde Dienst den Ausfall. |
 | `ALERT_RETENTION_HOURS` | `0` | Alerts, die älter sind, werden automatisch gelöscht. `0` = aus. |
 | `CLEANUP_CHANNELS` | — | Channel-IDs zum Aufräumen. Leer = die Channels, in die der Bot selbst alertet. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
