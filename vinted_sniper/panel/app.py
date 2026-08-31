@@ -72,6 +72,7 @@ class PanelServer:
                 web.post("/logout", self.logout),
                 web.post("/add", self.add_watch),
                 web.post("/import", self.import_watches),
+                web.post("/bulk", self.bulk_action),
                 web.post("/watch/{watch_id}/toggle", self.toggle_watch),
                 web.post("/watch/{watch_id}/delete", self.delete_watch),
                 web.post("/watch/{watch_id}/interval", self.set_interval),
@@ -348,6 +349,56 @@ class PanelServer:
                 zeilen += f"; … und {len(plan.problems) - 3} weitere"
             raise self._back(err=f"{meldung} {zeilen}")
         raise self._back(ok=meldung)
+
+    async def bulk_action(self, request: web.Request) -> web.StreamResponse:
+        """Mehrere Suchen auf einmal pausieren, fortsetzen oder löschen.
+
+        Bei 21 Suchen aus sieben Ländern ist alles andere Klickarbeit.
+        """
+        form = await request.post()
+        aktion = str(form.get("action", "")).strip()
+        if aktion not in ("pause", "resume", "delete"):
+            raise self._back(err="Unbekannte Aktion.")
+
+        ids: list[int] = []
+        for roh in form.getall("ids", []):
+            text = str(roh).strip()
+            if text.isdigit():
+                ids.append(int(text))
+        if not ids:
+            raise self._back(err="Es war keine Suche ausgewählt.")
+
+        betroffen = 0
+        for watch_id in dict.fromkeys(ids):
+            watch = await self.db.get_watch(watch_id)
+            if watch is None:
+                continue
+            if aktion == "delete":
+                self.monitor.stop(watch.id)
+                await self.db.delete_watch(watch.id)
+            elif aktion == "pause":
+                self.monitor.stop(watch.id)
+                await self.db.set_enabled(watch.id, False)
+            else:
+                await self.db.set_enabled(watch.id, True)
+                aktualisiert = await self.db.get_watch(watch.id)
+                if aktualisiert is not None:
+                    self.monitor.start(aktualisiert)
+            betroffen += 1
+
+        wort = {"delete": "gelöscht", "pause": "pausiert", "resume": "laufen wieder"}
+        if not betroffen:
+            raise self._back(err="Keine der ausgewählten Suchen gibt es noch.")
+
+        hinweis = ""
+        if aktion == "delete":
+            # Datei-Suchen kommen beim nächsten Start zurück — das erklärt
+            # sonst niemand, und der Nutzer hält es für einen Fehler.
+            hinweis = (
+                " Suchen aus searches.toml legt der nächste Start neu an; "
+                "nimm sie dort heraus, wenn sie weg bleiben sollen."
+            )
+        raise self._back(ok=f"{betroffen} Suche(n) {wort[aktion]}.{hinweis}")
 
     async def _watch_from(self, request: web.Request):
         try:

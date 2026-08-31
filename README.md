@@ -180,6 +180,16 @@ einen Reverse-Proxy, der nicht in Docker läuft, und zum Testen mit
 erreichbar, die Verbindung ins Internet läuft also immer über den Proxy und
 damit verschlüsselt.
 
+**Mehrere Suchen auf einmal:** Über der Liste sitzt eine Leiste mit
+Ankreuzfeldern. *alle*, *keine* oder ein Land anklicken, dann **Pausieren**,
+**Fortsetzen** oder **Löschen** — bei einundzwanzig Suchen aus sieben Ländern
+ist alles andere Klickarbeit. Ohne Javascript kreuzt man von Hand an und alles
+funktioniert weiterhin; das kurze Skript fügt nur die Sammelauswahl hinzu.
+
+Gelöschte Suchen aus `searches.toml` legt der nächste Start neu an — sollen sie
+weg bleiben, gehören sie auch dort heraus. Das Panel sagt das nach dem Löschen
+noch einmal dazu.
+
 Ohne `PANEL_PASSWORD` startet das Panel gar nicht erst — sonst könnte jeder die
 Suchen ändern, der die Adresse kennt. Die Anmeldung läuft über ein Formular mit
 signiertem `SameSite=Strict`-Cookie: damit kann keine fremde Seite Aktionen im

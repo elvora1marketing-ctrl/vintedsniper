@@ -223,6 +223,17 @@ code {
 .pill.on { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
 .pill.err { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
 
+/* ------------------------------------------------------------ Mehrfachwahl */
+
+.toolbar { position: sticky; top: 8px; z-index: 5; padding: 12px 14px; }
+.toolbar .spacer { flex: 1 1 auto; }
+.chosen { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.pick { display: flex; align-items: center; padding-top: 3px; flex: none; }
+.pick input {
+  width: 18px; height: 18px; margin: 0; padding: 0;
+  accent-color: var(--accent); cursor: pointer;
+}
+
 .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .actions form { display: inline-flex; gap: 6px; }
 .actions input[type=number] { width: 78px; }
@@ -355,6 +366,82 @@ def _laender_auswahl(feld_id: str, vorausgewaehlt: tuple[str, ...] = ()) -> str:
     )
 
 
+def _auswahl_leiste(watches: list[Watch]) -> str:
+    """Werkzeugleiste für Aktionen auf mehreren Suchen.
+
+    Das Formular selbst ist leer und steht neben der Liste: die Ankreuzfelder
+    in den Karten verweisen mit `form=bulk` darauf. So bleiben die
+    Einzelaktionen je Karte eigene Formulare — verschachtelte Formulare gibt es
+    in HTML nicht.
+
+    Ohne Javascript kreuzt man von Hand an und alles funktioniert; das kurze
+    Skript unten fügt nur „alle" und „je Land" hinzu.
+    """
+    if not watches:
+        return ""
+
+    hosts = sorted({w.host for w in watches})
+    laender = "".join(
+        f'<button type=button class="ghost small" data-pick="{escape(host)}">'
+        f"{domains.lookup(host).flag} {escape(host.removeprefix('www.vinted.'))}</button>"
+        for host in hosts
+    ) if len(hosts) > 1 else ""
+
+    return f"""
+    <form method=post action="/bulk" id=bulk class="card toolbar"
+          onsubmit="return vsBestaetigen(event)">
+      <div class=row>
+        <button type=button class="ghost small" data-pick="*">alle</button>
+        <button type=button class="ghost small" data-pick="">keine</button>
+        {laender}
+        <span class=spacer></span>
+        <span class=chosen id=vs-anzahl>0 ausgewählt</span>
+        <button class="ghost small" name=action value=pause>Pausieren</button>
+        <button class="ghost small" name=action value=resume>Fortsetzen</button>
+        <button class="danger small" name=action value=delete>Löschen</button>
+      </div>
+    </form>
+    <script>
+    (function () {{
+      var form = document.getElementById('bulk');
+      var zaehler = document.getElementById('vs-anzahl');
+      function boxen() {{
+        return Array.prototype.slice.call(
+          document.querySelectorAll('input[name=ids]'));
+      }}
+      function zaehlen() {{
+        var n = boxen().filter(function (b) {{ return b.checked; }}).length;
+        zaehler.textContent = n + ' ausgewählt';
+      }}
+      document.addEventListener('click', function (e) {{
+        var knopf = e.target.closest('[data-pick]');
+        if (!knopf) return;
+        var wahl = knopf.getAttribute('data-pick');
+        boxen().forEach(function (b) {{
+          b.checked = wahl === '*' || (wahl !== '' && b.dataset.host === wahl);
+        }});
+        zaehlen();
+      }});
+      document.addEventListener('change', function (e) {{
+        if (e.target.name === 'ids') zaehlen();
+      }});
+      window.vsBestaetigen = function (e) {{
+        var n = boxen().filter(function (b) {{ return b.checked; }}).length;
+        if (!n) {{
+          alert('Erst Suchen auswählen.');
+          return false;
+        }}
+        if (e.submitter && e.submitter.value === 'delete') {{
+          return confirm(n + ' Suche(n) endgültig löschen?');
+        }}
+        return true;
+      }};
+      zaehlen();
+    }})();
+    </script>
+    """
+
+
 def _page(title: str, body: str) -> str:
     return (
         "<!doctype html><html lang=de><head><meta charset=utf-8>"
@@ -424,6 +511,10 @@ def _watch_card(watch: Watch, running: bool) -> str:
     return f"""
     <div class=card>
       <div class=watch>
+        <label class=pick title="Suche #{watch.id} auswählen">
+          <input type=checkbox name=ids value="{watch.id}" form=bulk
+                 data-host="{escape(watch.host)}">
+        </label>
         <div class=info>
           <div class=name><span class=id>#{watch.id}</span>{escape(watch.name)} {pill}</div>
           <div class=meta>{domain.flag} {escape(watch.host)}{sep}{escape(watch.query.describe())}</div>
@@ -567,6 +658,7 @@ def dashboard(
         </details>
 
         <h2>Suchen <span class=count>({len(watches)})</span></h2>
+        {_auswahl_leiste(watches)}
         {karten}
         """,
     )
