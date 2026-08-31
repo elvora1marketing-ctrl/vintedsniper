@@ -16,6 +16,11 @@ services:
       # startest — sonst legt Docker an der Stelle ein Verzeichnis an:
       #   cp searches.example.toml searches.toml
       - ./searches.toml:/app/searches.toml:ro
+      # Kaufprofile: was ein Fund einbringen muss, um gemeldet zu werden.
+      # Muss existieren, bevor du startest — sonst legt Docker an der Stelle
+      # ein Verzeichnis an:
+      #   cp profiles.example.toml profiles.toml
+      - ./profiles.toml:/app/profiles.toml:ro
       # Proxy-Liste. Muss ebenfalls existieren, bevor du startest:
       #   touch proxies.txt
       - ./proxies.txt:/app/proxies.txt:ro

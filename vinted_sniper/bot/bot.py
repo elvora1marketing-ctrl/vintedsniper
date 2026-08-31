@@ -16,6 +16,7 @@ from ..db import Database, Watch
 from ..monitor import Monitor
 from ..notifiers import WebhookNotifier
 from ..panel.app import PanelServer
+from ..profiles import InvalidProfileFile, load_profiles
 from ..searches import InvalidSearchFile, load_searches, sync_to_db
 from ..vinted.client import VintedClient
 from ..vinted.models import Item
@@ -119,6 +120,25 @@ class SniperBot(commands.Bot):
             await self.tree.sync(guild=guild)
             log.info("Slash-Commands für „%s“ registriert.", guild.name)
 
+    def _load_profiles(self) -> None:
+        """Kaufprofile einlesen.
+
+        Eine kaputte Datei wird gemeldet und der Sniper läuft ohne Profile
+        weiter — er meldet dann mehr statt weniger. Andersherum (stumm bleiben)
+        wäre der teurere Fehler.
+        """
+        try:
+            self.monitor.profiles = load_profiles(self.settings.profiles_path)
+        except InvalidProfileFile as exc:
+            log.error("%s wird ignoriert: %s", self.settings.profiles_path, exc)
+            return
+        if self.monitor.profiles:
+            log.info(
+                "%d Kaufprofil(e) aktiv: %s",
+                len(self.monitor.profiles),
+                ", ".join(p.name for p in self.monitor.profiles),
+            )
+
     async def _sync_file_searches(self) -> None:
         """`searches.toml` mitlaufen lassen, falls vorhanden.
 
@@ -159,6 +179,7 @@ class SniperBot(commands.Bot):
         self._bootstrapped = True
 
         await self._register_commands()
+        self._load_profiles()
         await self._sync_file_searches()
         started = await self.monitor.start_all()
         log.info("%d gespeicherte Suchen gestartet.", started)

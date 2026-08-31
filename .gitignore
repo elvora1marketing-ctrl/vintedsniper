@@ -1,5 +1,6 @@
 .env
 searches.toml
+profiles.toml
 proxies.txt
 data/
 *.db

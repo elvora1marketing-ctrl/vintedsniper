@@ -44,6 +44,10 @@ class Item:
     # Einordnung des Preises („38 % unter Median"). Wird erst beim Melden
     # gesetzt — die Vergleichsbasis kennt nur der Monitor, nicht der Parser.
     price_note: str | None = None
+    # Urteil des Kaufprofils (`deals.Verdict`), ebenfalls erst beim Melden.
+    # Bewusst untypisiert: `deals` liest dieses Modul, andersherum entstünde
+    # ein Importkreis.
+    verdict: Any = None
 
     @property
     def buy_url(self) -> str:

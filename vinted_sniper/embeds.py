@@ -6,6 +6,7 @@ import datetime as dt
 
 import discord
 
+from . import deals
 from .db import Watch
 from .vinted import domains
 from .vinted.models import Item
@@ -16,6 +17,8 @@ OK_GREEN = 0x2ECC71
 # Deutlich unter Marktpreis. Ein eigener Farbton, damit im Nachrichtenstrom
 # sofort auffällt, wo sich das Hinschauen lohnt.
 DEAL_GREEN = 0x21A366
+# Kaufbar, aber erst nachfragen.
+DEAL_AMBER = 0xE0A400
 
 
 def _age_label(item: Item) -> str:
@@ -41,15 +44,28 @@ def item_embed(item: Item, watch: Watch, *, include_links: bool = False) -> disc
     """
     domain = domains.lookup(item.host)
     schnaeppchen = bool(item.price_note and "unter**" in item.price_note)
+    urteil = item.verdict
+
+    if urteil is not None:
+        gruen = urteil.grade == deals.GREEN
+        farbe = DEAL_GREEN if gruen else DEAL_AMBER
+        titel = f"{'🟢' if gruen else '🟡'} {item.title}"
+    else:
+        farbe = DEAL_GREEN if schnaeppchen else VINTED_TEAL
+        titel = item.title
 
     embed = discord.Embed(
-        title=item.title[:250],
+        title=titel[:250],
         # Eigene Farbe für Funde unter Marktpreis: im Nachrichtenstrom sieht
         # man das, bevor man liest.
-        color=DEAL_GREEN if schnaeppchen else VINTED_TEAL,
+        color=farbe,
         url=item.url,
         timestamp=dt.datetime.now(dt.timezone.utc),
     )
+    if urteil is not None:
+        embed.description = urteil.headline()
+        if urteil.notes:
+            embed.description += "\n⚠️ " + " · ".join(urteil.notes)
     preis = item.price_label()
     if item.price_note:
         preis = f"{preis}\n{item.price_note}"
@@ -64,6 +80,29 @@ def item_embed(item: Item, watch: Watch, *, include_links: bool = False) -> disc
         seller = f"[{item.seller}]({item.seller_url})" if item.seller_url else item.seller
         embed.add_field(name="Verkäufer", value=seller, inline=True)
     embed.add_field(name="Online", value=_age_label(item), inline=True)
+
+    if urteil is not None:
+        # Die Prüfliste gehört in den Alert, nicht in eine Doku: in den 90
+        # Sekunden, die für die Entscheidung bleiben, macht niemand einen
+        # zweiten Tab auf.
+        embed.add_field(
+            name="In 90 Sekunden prüfen",
+            value="\n".join(f"☐ {punkt}" for punkt in deals.CHECKLIST),
+            inline=False,
+        )
+        embed.add_field(
+            name="Wirklich verkaufte Vergleichsartikel",
+            value=f"[bei eBay nachsehen]({deals.ebay_sold_url(item)})",
+            inline=False,
+        )
+        if urteil.grade == deals.YELLOW:
+            # Gelb heißt „erst nachfragen" — dann gehört die Nachricht dazu,
+            # fertig zum Kopieren.
+            embed.add_field(
+                name="Nachricht an den Verkäufer",
+                value=f"```\n{deals.SELLER_QUESTION}\n```",
+                inline=False,
+            )
 
     if include_links:
         embed.add_field(

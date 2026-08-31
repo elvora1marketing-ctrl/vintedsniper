@@ -1,0 +1,102 @@
+# Kaufprofile — wonach der Sniper wirklich sucht und was es einbringen muss.
+#
+# Ohne diese Datei meldet der Sniper jeden neuen Treffer seiner Suchen. Mit ihr
+# rechnet er jeden Fund durch und meldet nur, was nach Versand, Käuferschutz und
+# Reserve genug übrig lässt.
+#
+# Kopieren und anpassen:
+#   cp profiles.example.toml profiles.toml
+#
+# Die Werte hier sind das Ralph-Lauren-Beispiel. Die Suchen selbst legst du
+# weiterhin im Panel oder per /watch an — das Profil entscheidet danach, was
+# davon einen Alert wert ist.
+
+# ---------------------------------------------------------------- Kosten
+# Was auf den Artikelpreis obendrauf kommt. Gilt für alle Profile, die nichts
+# Eigenes setzen.
+#
+# ACHTUNG: Schätzwerte. Vinted ändert Käuferschutz und Versandpreise, und sie
+# unterscheiden sich je Land. Prüf sie einmal an einem echten Kaufabschluss
+# gegen und trag deine Zahlen ein — an dieser Stelle entscheidet sich, ob die
+# Marge stimmt.
+[costs]
+shipping = 2.99            # Standardversand
+protection_fixed = 0.70    # Käuferschutz, fixer Anteil
+protection_percent = 5.0   # Käuferschutz, prozentualer Anteil
+refurb = 0.0               # Waschen, Dämpfen, Fusseln je Stück
+reserve = 3.0              # Puffer für Preisnachlässe und Überraschungen
+
+# ------------------------------------------------------------- Schwellen
+# Ab wann ein Fund kaufbar ist — und ab wann er richtig gut ist.
+[thresholds]
+min_profit = 12.0          # darunter wird nicht gemeldet
+min_roi = 60.0             # Rendite auf die Einkaufskosten, in Prozent
+green_profit = 15.0        # ab hier Grün statt Gelb
+
+# ------------------------------------------------------------ Profil 1/2
+# Der Brot-und-Butter-Fall.
+[[profile]]
+name = "RL Quarter/Half Zip"
+match_all = ["ralph lauren"]
+match_any = [
+    "quarter zip", "half zip", "1/4 zip", "1/2 zip", "viertelreißverschluss",
+    "troyer", "halbreißverschluss",
+]
+exclude = [
+    "defekt", "kaputt", "riss", "loch", "fleck", "verfärbt",
+    "fake", "replica", "replika", "nachbau", "inspired",
+    "bitte lesen", "bastler", "kinder", "damen", "women",
+]
+resale_price = 31.0        # konservativ zwischen 29 und 34
+max_item_price = 10.0      # Artikelpreis, darüber gar nicht erst rechnen
+max_total_cost = 15.0      # geschätzter Gesamt-EK inkl. Versand + Käuferschutz
+sizes = ["M", "L", "XL"]
+top_sizes = ["M", "L"]     # nur die geben Grün
+colors = [
+    "schwarz", "black", "navy", "marine", "grau", "grey", "gray",
+    "beige", "creme", "cream", "dunkelgrün", "green", "bordeaux", "burgundy",
+]
+top_colors = ["navy", "marine", "grau", "grey", "gray", "beige"]
+conditions = [
+    # Deutsch
+    "Sehr gut", "Gut",
+    # Die anderen Länder schreiben es anders — ohne diese Zeilen würde eine
+    # französische Suche jeden Fund wegen „unbekanntem Zustand" ablehnen.
+    "Très bon état", "Bon état",
+    "Ottime condizioni", "Buone condizioni",
+    "Muy bueno", "Bien",
+    "Zeer goed", "Goed",
+    "Very good", "Good",
+]
+top_conditions = ["Sehr gut", "Très bon état", "Ottime condizioni", "Muy bueno", "Zeer goed", "Very good"]
+
+# ------------------------------------------------------------ Profil 2/2
+# Zopfmuster bringt mehr und darf deshalb teurer eingekauft werden.
+[[profile]]
+name = "RL Cable Knit"
+match_all = ["ralph lauren"]
+match_any = ["cable knit", "zopfmuster", "cable-knit", "zopfstrick", "grobstrick"]
+exclude = [
+    "defekt", "kaputt", "riss", "loch", "fleck", "verfärbt",
+    "fake", "replica", "replika", "nachbau", "inspired",
+    "bitte lesen", "bastler", "kinder", "damen", "women",
+]
+resale_price = 42.0        # konservativ zwischen 39 und 45
+max_item_price = 15.0
+max_total_cost = 22.0
+sizes = ["M", "L", "XL"]
+top_sizes = ["M", "L"]
+colors = [
+    "schwarz", "black", "navy", "marine", "grau", "grey", "gray",
+    "beige", "creme", "cream", "dunkelgrün", "green", "bordeaux", "burgundy",
+]
+top_colors = ["navy", "marine", "grau", "grey", "gray", "beige"]
+conditions = [
+    "Sehr gut", "Gut",
+    "Très bon état", "Bon état",
+    "Ottime condizioni", "Buone condizioni",
+    "Muy bueno", "Bien",
+    "Zeer goed", "Goed",
+    "Very good", "Good",
+]
+top_conditions = ["Sehr gut", "Très bon état", "Ottime condizioni", "Muy bueno", "Zeer goed", "Very good"]

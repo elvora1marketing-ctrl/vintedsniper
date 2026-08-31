@@ -119,6 +119,8 @@ class Settings:
     alert_webhook_url: str
     # Suchdefinitionen für den Webhook-Modus.
     searches_path: Path
+    # Kaufprofile: was ein Fund einbringen muss, um gemeldet zu werden.
+    profiles_path: Path
 
     # --- Web-Panel ---
     # Leer = Panel bleibt aus. Ohne Passwort könnte sonst jeder die Suchen
@@ -214,6 +216,7 @@ class Settings:
             guild_id=guild_id,
             alert_webhook_url=webhook,
             searches_path=Path(os.getenv("SEARCHES_PATH", "searches.toml")),
+            profiles_path=Path(os.getenv("PROFILES_PATH", "profiles.toml")),
             panel_password=os.getenv("PANEL_PASSWORD", "").strip(),
             panel_host=os.getenv("PANEL_HOST", "0.0.0.0").strip() or "0.0.0.0",
             panel_port=_int("PANEL_PORT", 8080),

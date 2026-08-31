@@ -8,7 +8,7 @@ import random
 from dataclasses import replace
 from typing import Awaitable, Callable
 
-from . import pricing
+from . import deals, pricing
 from .config import Settings
 from .db import Database, Watch
 from .vinted.client import VintedClient
@@ -46,6 +46,9 @@ class Monitor:
 
         self._tasks: dict[int, asyncio.Task[None]] = {}
         self._housekeeping: asyncio.Task[None] | None = None
+        # Kaufprofile. Leer = jeder neue Treffer wird gemeldet; gesetzt = nur
+        # noch das, was nach allen Kosten genug Marge lässt.
+        self.profiles: list[deals.Profile] = []
 
     # ------------------------------------------------------------- Lebenszyklus
 
@@ -171,6 +174,9 @@ class Monitor:
                     fresh = await self._annotate(watch, fresh)
                     # Älteste zuerst posten, damit die Discord-Timeline stimmt.
                     fresh.reverse()
+                    # Profile schlagen die Reihenfolge: ein A-Deal wartet nicht,
+                    # bis drei B-Deals gepostet sind.
+                    fresh = self._graded(fresh)
                     if fresh:
                         log.info(
                             "Watch %s (%s): %d neue Artikel.",
@@ -182,6 +188,46 @@ class Monitor:
                     await self.db.mark_checked(watch_id, error=None, new_hits=len(fresh))
 
             await asyncio.sleep(self._with_jitter(delay))
+
+    def _graded(self, items: list[Item]) -> list[Item]:
+        """Funde bewerten, Aussortiertes verwerfen, A vor B stellen.
+
+        Ohne Profile bleibt alles wie es ist — der Sniper meldet dann jeden
+        neuen Treffer, wie vor dieser Erweiterung.
+        """
+        if not self.profiles or not items:
+            return items
+
+        bewertet: list[tuple[int, float, Item]] = []
+        verworfen = 0
+        for item in items:
+            urteil = deals.best_verdict(item, self.profiles)
+            if urteil is None:
+                # Gehört zu keinem Profil — nichts, wofür wir hier sind.
+                verworfen += 1
+                continue
+            if not urteil.accepted:
+                log.debug(
+                    "%s abgelehnt (%s): %s",
+                    item.id,
+                    urteil.profile.name,
+                    "; ".join(urteil.notes) or "unter der Schwelle",
+                )
+                verworfen += 1
+                continue
+            bewertet.append(
+                (0 if urteil.grade == "A" else 1, -urteil.profit,
+                 replace(item, verdict=urteil))
+            )
+
+        if verworfen:
+            log.info(
+                "%d von %d Funden erfüllen die Kaufprofile nicht.",
+                verworfen,
+                len(items),
+            )
+        bewertet.sort(key=lambda eintrag: (eintrag[0], eintrag[1]))
+        return [item for _, _, item in bewertet]
 
     def _is_wanted(self, item: Item) -> bool:
         """Offensichtlichen Ausschuss aussortieren, bevor er einen Alert kostet.

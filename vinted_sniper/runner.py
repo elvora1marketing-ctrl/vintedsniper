@@ -16,6 +16,7 @@ from .db import Database, DatabaseUnavailable
 from .monitor import Monitor
 from .notifiers import WebhookNotifier
 from .panel.app import PanelServer
+from .profiles import InvalidProfileFile, load_profiles
 from .searches import InvalidSearchFile, load_searches, sync_to_db
 from .vinted.client import VintedClient
 
@@ -34,6 +35,18 @@ async def run_webhook_mode(settings: Settings) -> int:
     except InvalidSearchFile as exc:
         log.error("%s", exc)
         return 1
+
+    try:
+        profile = load_profiles(settings.profiles_path)
+    except InvalidProfileFile as exc:
+        log.error("%s", exc)
+        return 1
+    if profile:
+        log.info(
+            "%d Kaufprofil(e) aktiv: %s",
+            len(profile),
+            ", ".join(p.name for p in profile),
+        )
 
     db = Database(settings.db_path)
     try:
@@ -77,6 +90,7 @@ async def run_webhook_mode(settings: Settings) -> int:
             await notifier.send_startup(settings.alert_webhook_url, watches)
 
         await panel.start()
+        monitor.profiles = profile
         started = await monitor.start_all()
         log.info("%d Suche(n) laufen. Beenden mit Strg-C.", started)
 

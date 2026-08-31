@@ -238,6 +238,46 @@ live geprüft: bei fünfzig Zeilen wären das fünfzig Abfragen auf einen Schlag
 und genau dafür sperrt Vinted zuverlässig. Taugt eine Suche nicht, steht sie
 nach dem ersten Durchlauf mit Fehler in der Übersicht.
 
+### Kaufprofile: melden, was sich rechnet
+
+Der Median sagt „günstiger als der Rest". Fürs Weiterverkaufen zählt eine
+andere Zahl: **was bleibt nach allen Kosten übrig?** Ein Fund für 10 € kann mit
+Versand und Käuferschutz bereits zu teuer sein.
+
+`profiles.toml` beschreibt, wonach du wirklich suchst und was es einbringen
+muss:
+
+```bash
+cp profiles.example.toml profiles.toml
+```
+
+Der Sniper rechnet dann jeden Fund durch und vergibt eine Ampel:
+
+| | |
+| --- | --- |
+| 🟢 **grün** | über der Gewinnschwelle, gefragte Größe und Farbe, bester Zustand |
+| 🟡 **gelb** | kaufbar, aber erst nachfragen: XL, Zustand „gut", Farbe unklar, knappe Marge |
+| 🔴 **rot** | unter der Schwelle, falsche Größe, Ausschlusswort im Titel — kommt gar nicht erst in den Channel |
+
+Gerechnet wird so:
+
+```
+konservativer VK − (Artikel + Versand + Käuferschutz + Aufbereitung) − Reserve
+```
+
+Jeder Alert nennt Gewinn, Gesamt-EK und ROI, hängt die 90-Sekunden-Prüfliste an
+und verlinkt die eBay-Suche nach **tatsächlich verkauften** Vergleichsartikeln.
+Bei Gelb liegt die Nachfrage an den Verkäufer fertig zum Kopieren dabei.
+
+**Drei Dinge, die die Ampel nicht kann.** Die Versand- und Käuferschutzkosten
+sind Schätzwerte — verbindlich ist der Betrag im Vinted-Checkout, und der
+gehört vor jedem Kauf angesehen. Echtheit, Pflegeetikett, Löcher und
+ausgeleierte Bündchen sieht nur ein Mensch auf den Fotos. Und ob ein Verkäufer
+zehn angeblich neue Teile derselben Marke anbietet, steht nicht in den
+Angebotsdaten. Die Ampel sagt „hinschauen lohnt sich", nicht „kaufen".
+
+**Der Sniper kauft nichts.** Er meldet, sonst nichts — und das bleibt so.
+
 ### Nur melden, was Geld wert ist
 
 Ein Sniper, der jeden neuen Treffer meldet, produziert vor allem Rauschen.
