@@ -289,6 +289,21 @@ class SniperBot(commands.Bot):
         for watch in await self.db.list_watches():
             if watch.channel_id and not watch.webhook_url:
                 return await self._resolve_channel(watch.channel_id)
+        # Keine Suche, kein fester Channel: dann der erste Textkanal, in dem
+        # der Bot schreiben darf. Genau in diesem Zustand — nichts angelegt,
+        # nichts passiert — muss der Startbericht ankommen, sonst sieht der
+        # Bot von außen aus wie tot.
+        for guild in self.guilds:
+            me = guild.me
+            for channel in guild.text_channels:
+                if me is not None and channel.permissions_for(me).send_messages:
+                    log.warning(
+                        "Kein Channel für Statusmeldungen eingestellt — nehme #%s "
+                        "in „%s“. Fest einstellen mit HEALTH_CHANNEL.",
+                        channel.name,
+                        guild.name,
+                    )
+                    return channel
         return None
 
     async def _deliver_health(self, titel: str, text: str, alarm: bool) -> None:
