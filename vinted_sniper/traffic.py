@@ -63,15 +63,18 @@ class Meter:
         """Durchschnittliche Antwortgröße — die Zahl, mit der man hochrechnet."""
         return self.day_bytes / self.day_requests if self.day_requests else 0.0
 
-    def forecast(self, watches: int, interval: float) -> int:
+    def forecast(self, watches: int, interval: float, *, fraction: float = 1.0) -> int:
         """Hochrechnung auf 30 Tage bei gegebener Anzahl Suchen und Takt.
 
         Genau das, was man vor dem Nachkaufen wissen will: reicht das
         Kontingent für einen Monat, oder ist es in drei Tagen weg?
+
+        `fraction` ist der Anteil des Tages, an dem gesucht wird — mit
+        `ACTIVE_HOURS=08:00-23:00` sind das 15 von 24 Stunden.
         """
         if watches <= 0 or interval <= 0 or not self.average:
             return 0
-        abfragen_pro_tag = watches * 86_400 / interval
+        abfragen_pro_tag = watches * 86_400 / interval * max(0.0, min(1.0, fraction))
         return int(abfragen_pro_tag * self.average * 30)
 
     def summary(self) -> str:

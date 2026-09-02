@@ -49,6 +49,13 @@ class Monitor:
         # Kaufprofile. Leer = jeder neue Treffer wird gemeldet; gesetzt = nur
         # noch das, was nach allen Kosten genug Marge lässt.
         self.profiles: list[deals.Profile] = []
+        # Zeitfenster fürs Abfragen. None = rund um die Uhr.
+        self.window = getattr(settings, "active_hours", None)
+
+    @property
+    def paused(self) -> bool:
+        """Gerade außerhalb des Zeitfensters?"""
+        return self.window is not None and not self.window.is_open()
 
     # ------------------------------------------------------------- Lebenszyklus
 
@@ -127,12 +134,30 @@ class Monitor:
         primed = await self.db.has_seen_any(watch_id)
         consecutive_errors = 0
         notified_trouble = False
+        pause_gemeldet = False
 
         while True:
             watch = await self.db.get_watch(watch_id)
             if watch is None or not watch.enabled:
                 log.info("Watch %s existiert nicht mehr oder ist pausiert.", watch_id)
                 return
+
+            # Außerhalb des Zeitfensters: keine Anfrage, kein Volumen. Höchstens
+            # eine Stunde am Stück schlafen, damit eine Änderung am Fenster
+            # nicht erst am nächsten Morgen greift.
+            if self.paused:
+                warte = self.window.seconds_until_open() if self.window else 0.0
+                if not pause_gemeldet:
+                    pause_gemeldet = True
+                    log.info(
+                        "Watch %s (%s): Pause, %s.",
+                        watch_id,
+                        watch.name,
+                        self.window.describe_now() if self.window else "",
+                    )
+                await asyncio.sleep(min(warte, 3600.0) + random.uniform(0, 5))
+                continue
+            pause_gemeldet = False
 
             delay = watch.interval
             try:

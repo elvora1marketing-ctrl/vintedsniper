@@ -95,3 +95,38 @@ class ReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowAndTrafficRowTests(unittest.TestCase):
+    def zeile(self, zeilen, label):
+        return next(z for z in zeilen if z.label == label)
+
+    def test_rund_um_die_uhr_ohne_fenster(self):
+        zeilen = report.rows(einstellungen(), [watch(1)], PROFILE)
+        self.assertEqual(self.zeile(zeilen, "Aktiv").value, "rund um die Uhr")
+
+    def test_fenster_wird_genannt(self):
+        from vinted_sniper import schedule
+        fenster = schedule.parse("08:00-23:00")
+        zeilen = report.rows(einstellungen(active_hours=fenster), [watch(1)], PROFILE)
+        self.assertIn("08:00–23:00", self.zeile(zeilen, "Aktiv").value)
+
+    def test_volumen_ohne_messung(self):
+        zeilen = report.rows(einstellungen(), [watch(1)], PROFILE)
+        self.assertIn("noch nichts gemessen", self.zeile(zeilen, "Volumen").value)
+
+    def test_volumen_mit_hochrechnung(self):
+        from vinted_sniper import schedule
+        from vinted_sniper.traffic import Meter
+        meter = Meter()
+        meter.record("www.vinted.de", 50_000)
+        fenster = schedule.parse("08:00-20:00")  # 12 h = halber Tag
+        zeilen = report.rows(
+            einstellungen(active_hours=fenster), [watch(1, interval=60)], PROFILE,
+            meter=meter,
+        )
+        text = self.zeile(zeilen, "Volumen").value
+        self.assertIn("hochgerechnet", text)
+        self.assertIn("12 h am Tag", text)
+        # 1 Suche, alle 60 s, halber Tag: 720 Abfragen × 50 KB × 30 Tage ≈ 1,0 GB
+        self.assertIn("1,0 GB", text)

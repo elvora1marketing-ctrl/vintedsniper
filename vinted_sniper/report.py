@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from . import traffic
 from .db import Watch
 from .vinted import domains
 
@@ -48,10 +49,21 @@ def _laender(watches: Sequence[Watch]) -> str:
     return ", ".join(eintraege) if eintraege else "—"
 
 
-def rows(settings: Any, watches: Sequence[Watch], profiles: Sequence[Any]) -> list[Row]:
-    """Die Zeilen des Berichts, in der Reihenfolge, in der sie wichtig sind."""
+def rows(
+    settings: Any,
+    watches: Sequence[Watch],
+    profiles: Sequence[Any],
+    meter: Any = None,
+) -> list[Row]:
+    """Die Zeilen des Berichts, in der Reihenfolge, in der sie wichtig sind.
+
+    `meter` (`traffic.Meter`) ergänzt das gemessene Proxy-Volumen samt
+    Hochrechnung — die Zahl, die entscheidet, ob das Kontingent den Monat
+    übersteht.
+    """
     aktiv = [w for w in watches if w.enabled]
     ergebnis: list[Row] = []
+    fenster = getattr(settings, "active_hours", None)
 
     if getattr(settings, "polling_enabled", True):
         takt = sum(w.interval for w in aktiv) / len(aktiv) if aktiv else 0.0
@@ -78,6 +90,12 @@ def rows(settings: Any, watches: Sequence[Watch], profiles: Sequence[Any]) -> li
             )
         )
 
+    ergebnis.append(
+        Row(
+            "Aktiv",
+            fenster.describe_now() if fenster is not None else "rund um die Uhr",
+        )
+    )
     ergebnis.append(Row("Länder", _laender(aktiv)))
 
     scope = getattr(settings, "dedupe_scope", "all")
@@ -114,6 +132,7 @@ def rows(settings: Any, watches: Sequence[Watch], profiles: Sequence[Any]) -> li
 
     proxys = len(getattr(settings, "proxies", []) or [])
     ergebnis.append(Row("Proxy", f"{proxys} Sitzung(en)" if proxys else "keiner — eigene IP"))
+    ergebnis.append(Row("Volumen", _volumen(meter, aktiv, fenster)))
 
     heartbeat = getattr(settings, "heartbeat_url", "") or ""
     ergebnis.append(
@@ -124,6 +143,24 @@ def rows(settings: Any, watches: Sequence[Watch], profiles: Sequence[Any]) -> li
         )
     )
     return ergebnis
+
+
+def _volumen(meter: Any, aktiv: Sequence[Watch], fenster: Any) -> str:
+    """Gemessen plus Hochrechnung — oder, solange nichts gemessen ist, warum."""
+    if meter is None or not getattr(meter, "requests", 0):
+        return "noch nichts gemessen — steht nach den ersten Abfragen hier"
+    takt = sum(w.interval for w in aktiv) / len(aktiv) if aktiv else 0.0
+    anteil = fenster.daily_fraction if fenster is not None else 1.0
+    prognose = meter.forecast(len(aktiv), takt, fraction=anteil)
+    text = meter.summary()
+    if prognose:
+        text += (
+            f" · hochgerechnet {traffic.human(prognose)} in 30 Tagen bei "
+            f"{len(aktiv)} Suchen alle {takt:.0f} s"
+        )
+        if anteil < 1.0:
+            text += f" und {anteil * 24:.0f} h am Tag"
+    return text
 
 
 def is_alarm(zeilen: Sequence[Row]) -> bool:

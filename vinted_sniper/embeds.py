@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 import discord
 
@@ -205,6 +206,7 @@ def status_embed(
     sessions: dict[str, str],
     started_at: dt.datetime,
     meter: traffic.Meter | None = None,
+    window: Any = None,
 ) -> discord.Embed:
     active = [w for w in watches if w.enabled]
     failing = [w for w in active if w.last_error]
@@ -236,12 +238,14 @@ def status_embed(
         takt = (
             sum(w.interval for w in aktiv) / len(aktiv) if aktiv else 0.0
         )
-        prognose = meter.forecast(len(aktiv), takt)
+        anteil = window.daily_fraction if window is not None else 1.0
+        prognose = meter.forecast(len(aktiv), takt, fraction=anteil)
         text = meter.summary()
         if prognose:
             text += (
                 f"\n**Hochgerechnet: {traffic.human(prognose)} in 30 Tagen** "
                 f"bei {len(aktiv)} Suchen alle {takt:.0f}s"
+                + (f" und {anteil * 24:.0f} h am Tag" if anteil < 1.0 else "")
             )
         embed.add_field(name="Proxy-Volumen", value=text, inline=False)
     if sessions:

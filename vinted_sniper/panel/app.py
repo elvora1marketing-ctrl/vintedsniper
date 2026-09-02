@@ -171,7 +171,10 @@ class PanelServer:
         watches = await self.db.list_watches()
         running = {w.id for w in watches if self.monitor.is_running(w.id)}
         betrieb = (
-            report.rows(self.settings, watches, self.monitor.profiles)
+            report.rows(
+                self.settings, watches, self.monitor.profiles,
+                meter=self.client.pool.meter,
+            )
             if self.settings is not None
             else []
         )
@@ -186,6 +189,7 @@ class PanelServer:
                 default_countries=self.default_countries,
                 traffic_line=self.client.pool.meter.summary(),
                 betrieb=betrieb,
+                paused=getattr(self.monitor, "paused", False),
             ),
             content_type="text/html",
             charset="utf-8",

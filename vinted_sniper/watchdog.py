@@ -97,6 +97,16 @@ class Watchdog:
             log.debug("Heartbeat-Ping fehlgeschlagen: %s", exc)
 
     async def _check(self) -> None:
+        # Außerhalb des Zeitfensters schweigen die Suchen absichtlich. Und
+        # direkt nach dem Aufgehen hat noch keine gelaufen — auch das ist
+        # kein Ausfall, sondern der Morgen.
+        fenster = getattr(self.settings, "active_hours", None)
+        if fenster is not None:
+            if not fenster.is_open():
+                return
+            if fenster.seconds_since_open() < self.settings.health_stale_after:
+                return
+
         watches = await self.db.list_watches()
         zustand = health.inspect(
             watches, stale_after=self.settings.health_stale_after

@@ -492,13 +492,15 @@ def login_page(*, error: str | None = None) -> str:
     )
 
 
-def _watch_card(watch: Watch, running: bool) -> str:
+def _watch_card(watch: Watch, running: bool, paused: bool = False) -> str:
     domain = domains.lookup(watch.host)
 
     if not watch.enabled:
         pill = '<span class=pill>pausiert</span>'
     elif watch.last_error:
         pill = '<span class="pill err">Fehler</span>'
+    elif running and paused:
+        pill = '<span class=pill title="Außerhalb des Zeitfensters (ACTIVE_HOURS)">Nachtruhe</span>'
     elif running:
         pill = '<span class="pill on">läuft</span>'
     else:
@@ -569,6 +571,7 @@ def dashboard(
     default_countries: tuple[str, ...] = (),
     traffic_line: str = "",
     betrieb: list[Row] | None = None,
+    paused: bool = False,
 ) -> str:
     flash = ""
     if error:
@@ -590,7 +593,7 @@ def dashboard(
         f"{stunden} h" if stunden else f"{int(laufzeit.total_seconds() // 60)} Min"
     )
 
-    karten = "".join(_watch_card(w, w.id in running) for w in watches) or (
+    karten = "".join(_watch_card(w, w.id in running, paused) for w in watches) or (
         "<div class=card><div class=meta>Noch keine Suche angelegt. Oben eine "
         "Vinted-Adresse einfügen — die Filter kommen automatisch mit.</div></div>"
     )

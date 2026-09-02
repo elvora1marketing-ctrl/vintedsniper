@@ -268,7 +268,10 @@ class SniperBot(commands.Bot):
     async def _report_startup(self) -> None:
         """Beim Start sagen, was gilt — statt jemanden in die .env schauen zu lassen."""
         zeilen = report.rows(
-            self.settings, await self.db.list_watches(), self.monitor.profiles
+            self.settings,
+            await self.db.list_watches(),
+            self.monitor.profiles,
+            meter=self.client.pool.meter,
         )
         try:
             await self._deliver_health(

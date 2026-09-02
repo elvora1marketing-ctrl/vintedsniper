@@ -122,7 +122,9 @@ async def run_webhook_mode(settings: Settings) -> int:
 
         # Was gilt, sagt der Sniper selbst — niemand soll dafür in die .env
         # schauen müssen.
-        zeilen = report.rows(settings, await db.list_watches(), profile)
+        zeilen = report.rows(
+            settings, await db.list_watches(), profile, meter=client.pool.meter
+        )
         await melde_zustand(
             report.title(zeilen), report.discord_text(zeilen), report.is_alarm(zeilen)
         )

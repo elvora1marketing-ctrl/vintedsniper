@@ -10,7 +10,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from . import schedule
 from .proxies import load_proxies
+from .schedule import Window
 from .vinted import domains
 
 load_dotenv()
@@ -202,6 +204,9 @@ class Settings:
     # Bewertung, Entdopplung und Discord laufen weiter; Treffer kommen dann
     # aus Vinteds eigenen Benachrichtigungen und werden hier nur bewertet.
     polling_enabled: bool
+    # Zeitfenster, in dem abgefragt wird. `None` = rund um die Uhr.
+    active_hours: Window | None
+    timezone: str
     default_interval: int
     min_interval: int
     per_page: int
@@ -262,6 +267,12 @@ class Settings:
         min_interval = max(5, _int("MIN_INTERVAL", 20))
         default_interval = max(min_interval, _int("DEFAULT_INTERVAL", 60))
 
+        zeitzone = os.getenv("TIMEZONE", "").strip() or "Europe/Berlin"
+        try:
+            fenster = schedule.parse(os.getenv("ACTIVE_HOURS", ""), zeitzone)
+        except schedule.InvalidWindow as exc:
+            raise SystemExit(str(exc)) from exc
+
         return cls(
             discord_token=token,
             guild_id=guild_id,
@@ -282,6 +293,8 @@ class Settings:
             cleanup_channel_ids=_ids("CLEANUP_CHANNELS"),
             db_path=Path(os.getenv("DB_PATH", "data/sniper.db")),
             polling_enabled=_bool("POLLING", True),
+            active_hours=fenster,
+            timezone=zeitzone,
             default_interval=default_interval,
             min_interval=min_interval,
             per_page=max(1, min(96, _int("PER_PAGE", 20))),

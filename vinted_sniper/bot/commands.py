@@ -772,5 +772,6 @@ class StatusCommand(commands.Cog):
                 sessions=self.bot.client.pool.status(),
                 started_at=self.bot.started_at,
                 meter=self.bot.client.pool.meter,
+                window=self.bot.monitor.window,
             )
         )

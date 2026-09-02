@@ -244,6 +244,29 @@ dafür hängt an jedem Ergebnis.
 
 ---
 
+## Nicht rund um die Uhr
+
+Nachts wird auf Vinted wenig eingestellt, und wer um drei Uhr einen Alert
+bekommt, schläft. Jede Abfrage in der Zeit kostet trotzdem Proxy-Volumen.
+
+```
+ACTIVE_HOURS=08:00-23:00
+TIMEZONE=Europe/Berlin
+```
+
+Außerhalb des Fensters geht keine einzige Anfrage raus. Die Suchen bleiben
+angelegt, im Panel steht „Nachtruhe" statt „läuft", der Wachhund schlägt
+nicht Alarm, und um acht geht es weiter. Das Fenster darf über Mitternacht
+gehen (`22:00-02:00`). Die Volumen-Hochrechnung rechnet mit dem Fenster: bei
+15 von 24 Stunden sind es 15 von 24 Stunden.
+
+Was zwischen 23 und 8 Uhr eingestellt wird, sieht der Sniper nicht — auch
+nicht um acht nachträglich, denn Artikel älter als `MAX_ITEM_AGE` werden
+nicht gemeldet. Das ist Absicht: ein Fund von vier Uhr nachts ist um acht
+meist weg.
+
+---
+
 ## Proxy-Volumen im Blick behalten
 
 Beim Proxy zahlt man nach übertragenen Bytes, nicht nach Abfragen. Ist das
@@ -734,6 +757,8 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `HEARTBEAT_URL` | — | Totmannschalter: URL, die jede Minute angepingt wird. Bleibt der Ping aus, meldet der fremde Dienst den Ausfall. |
 | `ALERT_RETENTION_HOURS` | `0` | Alerts, die älter sind, werden automatisch gelöscht. `0` = aus. |
 | `CLEANUP_CHANNELS` | — | Channel-IDs zum Aufräumen. Leer = die Channels, in die der Bot selbst alertet. |
+| `ACTIVE_HOURS` | — | Zeitfenster fürs Abfragen, z. B. `08:00-23:00`. Außerhalb keine Anfragen, kein Volumen. Leer = rund um die Uhr. |
+| `TIMEZONE` | `Europe/Berlin` | Zeitzone für `ACTIVE_HOURS`. |
 | `DEFAULT_INTERVAL` | `60` | Prüfintervall neuer Suchen (Sekunden). |
 | `MIN_INTERVAL` | `20` | Untergrenze, die `/watch interval` nicht unterschreitet. |
 | `POLLING` | `on` | `off` stellt jede Anfrage an Vinted ab — Bewertung, Panel und Discord laufen weiter. |
