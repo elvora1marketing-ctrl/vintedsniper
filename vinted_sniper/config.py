@@ -164,8 +164,10 @@ class Settings:
     # sieht ihn nie. Leer = nur die Domain aus der jeweiligen Such-URL.
     extra_countries: tuple[str, ...]
     # Wie weit ein bereits gemeldeter Artikel andere Suchen stummschaltet.
-    # `group` = nur die Länderkopien derselben Suche (Standard), `all` = jede
-    # Suche, `watch` = gar nicht, jede Suche meldet für sich.
+    # `all` = jede Suche (Standard: ein Artikel, ein Alert), `group` = nur
+    # die Länderkopien derselben Suche, `watch` = gar nicht, jede Suche
+    # meldet für sich. Neu eingestellte Kopien desselben Artikels werden in
+    # jedem Modus zusammengefasst.
     dedupe_scope: str
 
     # --- Überwachung ---
@@ -270,7 +272,7 @@ class Settings:
             panel_host=os.getenv("PANEL_HOST", "0.0.0.0").strip() or "0.0.0.0",
             panel_port=_int("PANEL_PORT", 8080),
             extra_countries=_countries("EXTRA_COUNTRIES"),
-            dedupe_scope=_choice("DEDUPE_SCOPE", "group", ("group", "all", "watch")),
+            dedupe_scope=_choice("DEDUPE_SCOPE", "all", ("group", "all", "watch")),
             alert_mention=_mention("ALERT_MENTION"),
             health_channel_id=_int("HEALTH_CHANNEL", 0),
             health_stale_after=max(60.0, _float("HEALTH_STALE_AFTER", 900.0)),

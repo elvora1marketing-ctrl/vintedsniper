@@ -66,6 +66,11 @@ def item_embed(item: Item, watch: Watch, *, include_links: bool = False) -> disc
         embed.description = urteil.headline()
         if urteil.notes:
             embed.description += "\n⚠️ " + " · ".join(urteil.notes)
+        rechnung = urteil.breakdown()
+        if rechnung:
+            # Die Rechnung steht im Alert, nicht nur das Ergebnis: eine Zahl
+            # ohne Herleitung kann man nicht prüfen, und geprüft werden muss.
+            embed.add_field(name="Rechnung", value=rechnung, inline=False)
     preis = item.price_label()
     if item.price_note:
         preis = f"{preis}\n{item.price_note}"

@@ -479,6 +479,85 @@ class DedupeTests(DatabaseTestCase):
         )
 
 
+class FingerprintDedupeTests(DatabaseTestCase):
+    """Derselbe Artikel unter neuer ID darf nicht noch einmal gemeldet werden.
+
+    Verkäufer löschen und stellen neu ein, um oben zu landen, oder legen
+    denselben Pullover zweimal an. Die ID ist dann neu, der Artikel nicht.
+    """
+
+    async def anlegen(self, host="www.vinted.de", *, name=None, text="nike"):
+        query = parse_search_url(f"https://{host}/catalog?search_text={text}")
+        return await self.db.add_watch(
+            guild_id=1, channel_id=2, creator_id=3, name=name or host,
+            query=query, source_url=query.web_url(), interval=60,
+        )
+
+    async def test_neueinstellung_wird_nicht_nochmal_gemeldet(self):
+        w = await self.anlegen()
+        erste = await self.db.filter_new(w.id, ["1"], prints={"1": "abc"})
+        self.assertEqual(erste, {"1"})
+        zweite = await self.db.filter_new(w.id, ["2"], prints={"2": "abc"})
+        self.assertEqual(zweite, set(), "gleicher Abdruck, neue ID")
+        self.assertEqual(self.db.last_duplicates, 1)
+
+    async def test_zaehlt_ueber_suchen_und_modi_hinweg(self):
+        # Ein Artikel ist ein Artikel — auch wenn DEDUPE_SCOPE=watch die
+        # ID-Entdopplung zwischen Suchen abschaltet.
+        a = await self.anlegen(name="A")
+        b = await self.anlegen(name="B", text="carhartt")
+        await self.db.filter_new(a.id, ["1"], scope="watch", prints={"1": "abc"})
+        neu = await self.db.filter_new(b.id, ["2"], scope="watch", prints={"2": "abc"})
+        self.assertEqual(neu, set())
+
+    async def test_gleicher_abdruck_im_selben_durchlauf(self):
+        # Zweimal derselbe Pullover in einer Antwort: einer reicht.
+        w = await self.anlegen()
+        neu = await self.db.filter_new(
+            w.id, ["1", "2", "3"], prints={"1": "abc", "2": "abc", "3": "xyz"}
+        )
+        self.assertEqual(neu, {"1", "3"})
+        self.assertEqual(self.db.last_duplicates, 1)
+
+    async def test_andere_abdruecke_kommen_durch(self):
+        w = await self.anlegen()
+        await self.db.filter_new(w.id, ["1"], prints={"1": "abc"})
+        neu = await self.db.filter_new(w.id, ["2"], prints={"2": "def"})
+        self.assertEqual(neu, {"2"})
+
+    async def test_ohne_abdruck_keine_zusammenfassung(self):
+        # Leerer Abdruck (kein Verkäufer bekannt) darf nichts zusammenfassen —
+        # sonst würden alle verkäuferlosen Artikel zu einem.
+        w = await self.anlegen()
+        await self.db.filter_new(w.id, ["1"], prints={"1": ""})
+        neu = await self.db.filter_new(w.id, ["2"], prints={"2": ""})
+        self.assertEqual(neu, {"2"})
+
+    async def test_dieselbe_id_ist_kein_verwandter(self):
+        # Suche A meldet ID 1, Suche B sieht ID 1 mit demselben Abdruck:
+        # im Modus watch darf B melden — der Abdruck gehört ja derselben ID.
+        a = await self.anlegen(name="A")
+        b = await self.anlegen(name="B", text="carhartt")
+        await self.db.filter_new(a.id, ["1"], scope="watch", prints={"1": "abc"})
+        neu = await self.db.filter_new(b.id, ["1"], scope="watch", prints={"1": "abc"})
+        self.assertEqual(neu, {"1"})
+
+    async def test_unterdrueckte_neueinstellung_bleibt_vermerkt(self):
+        w = await self.anlegen()
+        await self.db.filter_new(w.id, ["1"], prints={"1": "abc"})
+        await self.db.filter_new(w.id, ["2"], prints={"2": "abc"})
+        # Beim nächsten Durchlauf ist ID 2 bekannt — kein Alert, keine Zählung.
+        self.assertEqual(await self.db.filter_new(w.id, ["2"], prints={"2": "abc"}), set())
+        self.assertEqual(self.db.last_duplicates, 0)
+
+    async def test_abdruecke_werden_mit_ausgeraeumt(self):
+        w = await self.anlegen()
+        await self.db.filter_new(w.id, ["1"], prints={"1": "abc"})
+        await self.db.prune_seen(older_than_days=-1)
+        neu = await self.db.filter_new(w.id, ["2"], prints={"2": "abc"})
+        self.assertEqual(neu, {"2"})
+
+
 class PriceSampleTests(DatabaseTestCase):
     """Die Vergleichsbasis, aus der „38 % unter Median" entsteht."""
 

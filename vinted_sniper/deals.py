@@ -25,11 +25,24 @@ Der Sniper kauft nichts und wird nichts kaufen. Er meldet.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Mapping
 from urllib.parse import quote_plus
 
 from .vinted.models import Item
+
+
+def cents(value: float) -> float:
+    """Kaufmännisch auf den Cent runden.
+
+    Geld wird hier grundsätzlich in gerundeten Beträgen verglichen. Sonst
+    entscheidet irgendwann ein 11,999999 € gegen 12 € — und niemand könnte
+    nachrechnen, warum ein Fund Rot bekam.
+    """
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 @dataclass(frozen=True)
@@ -40,6 +53,10 @@ class Costs:
     Käuferschutz und Versand ändert Vinted von Zeit zu Zeit und je nach Land —
     die Zahlen gehören einmal am echten Kaufabschluss gegengeprüft und dann in
     die `profiles.toml`.
+
+    Wo Vinted den Käuferschutz selbst mitliefert (`total_item_price` in den
+    Angebotsdaten), wird der genommen und nicht die Schätzung — siehe
+    `evaluate`.
     """
 
     shipping: float = 2.99
@@ -51,15 +68,90 @@ class Costs:
     # abgezogen, nicht auf die Kosten geschlagen: er ist Risiko, nicht Ausgabe.
     reserve: float = 3.0
 
+    def protection(self, price: float) -> float:
+        """Geschätzter Käuferschutz für einen Artikelpreis."""
+        return cents(self.protection_fixed + price * self.protection_percent / 100.0)
+
     def total(self, price: float) -> float:
         """Einkaufspreis inklusive allem, was oben draufkommt."""
-        return (
-            price
-            + self.shipping
-            + self.protection_fixed
-            + price * self.protection_percent / 100.0
-            + self.refurb
+        return cents(price + self.shipping + self.protection(price) + self.refurb)
+
+
+# Woher die Nebenkosten einer Rechnung stammen. Steht im Alert, damit man
+# weiß, wie belastbar die Zahl ist.
+ESTIMATED = "geschaetzt"
+FROM_VINTED = "vinted"
+FROM_CHECKOUT = "checkout"
+
+
+@dataclass(frozen=True)
+class Bill:
+    """Die Rechnung hinter einem Urteil — jeder Posten einzeln.
+
+    Ein Gewinn ohne Rechnung ist eine Behauptung. Hier steht, was wie
+    zusammengezählt wurde, in der Währung des Profils.
+    """
+
+    item_price: float
+    shipping: float
+    protection: float
+    refurb: float
+    reserve: float
+    resale_price: float
+    currency: str = "EUR"
+    # ESTIMATED: Versand und Käuferschutz aus dem Profil geschätzt.
+    # FROM_VINTED: Käuferschutz aus den Angebotsdaten, Versand geschätzt.
+    # FROM_CHECKOUT: Gesamtbetrag aus dem Checkout abgelesen; Versand und
+    # Käuferschutz stehen dann zusammen in `protection`.
+    source: str = ESTIMATED
+    # (Originalpreis, Originalwährung, Kurs), wenn umgerechnet wurde.
+    converted: tuple[float, str, float] | None = None
+
+    @property
+    def total(self) -> float:
+        return cents(self.item_price + self.shipping + self.protection + self.refurb)
+
+    @property
+    def profit(self) -> float:
+        return cents(self.resale_price - self.total - self.reserve)
+
+    @property
+    def roi(self) -> float:
+        """Gewinn im Verhältnis zum eingesetzten Geld, in Prozent."""
+        return (self.profit / self.total * 100.0) if self.total > 0 else 0.0
+
+    def _geld(self, value: float) -> str:
+        betrag = f"{value:.2f}".replace(".", ",")
+        return f"{betrag} €" if self.currency == "EUR" else f"{betrag} {self.currency}"
+
+    def lines(self) -> tuple[str, str]:
+        """Zwei Zeilen: Einkauf und Ergebnis — zum Nachrechnen im Alert."""
+        posten = [f"{self._geld(self.item_price)} Artikel"]
+        if self.converted is not None:
+            original, waehrung, kurs = self.converted
+            posten[0] = (
+                f"{original:.2f} {waehrung} × {kurs:g} = "
+                f"{self._geld(self.item_price)} Artikel"
+            ).replace(".", ",", 1)
+        if self.source == FROM_CHECKOUT:
+            posten.append(
+                f"{self._geld(self.protection)} Versand + Käuferschutz laut Checkout"
+            )
+        else:
+            posten.append(f"{self._geld(self.shipping)} Versand (geschätzt)")
+            quelle = "laut Vinted" if self.source == FROM_VINTED else "geschätzt"
+            posten.append(f"{self._geld(self.protection)} Käuferschutz ({quelle})")
+        if self.refurb:
+            posten.append(f"{self._geld(self.refurb)} Aufbereitung")
+        einkauf = " + ".join(posten) + f" = **{self._geld(self.total)} Gesamt-EK**"
+
+        vorzeichen = "+" if self.profit >= 0 else "−"
+        ergebnis = (
+            f"{self._geld(self.resale_price)} VK − {self._geld(self.total)} − "
+            f"{self._geld(self.reserve)} Reserve = **{vorzeichen}"
+            f"{self._geld(abs(self.profit))} Gewinn** ({self.roi:.0f} % ROI)"
         )
+        return einkauf, ergebnis
 
 
 @dataclass(frozen=True)
@@ -102,6 +194,11 @@ class Profile:
     top_conditions: tuple[str, ...] = ()
     costs: Costs = field(default_factory=Costs)
     thresholds: Thresholds = field(default_factory=Thresholds)
+    # Währung, in der Verkaufspreis und Kosten angegeben sind.
+    currency: str = "EUR"
+    # Kurse für Funde in anderen Währungen: Fremdwährung → Profilwährung,
+    # z. B. {"GBP": 1.17}. Fehlt der Kurs, wird nicht geraten, sondern Rot.
+    rates: Mapping[str, float] = field(default_factory=dict)
 
 
 GREEN = "gruen"
@@ -136,7 +233,9 @@ def max_buy_price(profile: Profile) -> float:
         kandidaten.append(profile.max_item_price)
     if profile.max_total_cost:
         kandidaten.append((profile.max_total_cost - fix) / anteil)
-    return max(0.0, min(kandidaten))
+    # Abrunden, nicht runden: „bis 9,54 €" muss die Marge noch halten, und
+    # 9,545 aufgerundet täte das nicht.
+    return max(0.0, math.floor(min(kandidaten) * 100.0 + 1e-9) / 100.0)
 
 
 @dataclass(frozen=True)
@@ -150,18 +249,29 @@ class Verdict:
     total_cost: float
     # Warum es nicht Grün wurde bzw. woran es scheitert.
     notes: tuple[str, ...] = ()
+    # Die Rechnung dahinter. Fehlt, wenn der Fund vor dem Rechnen ausschied
+    # (Ausschlusswort, Größe, Zustand).
+    bill: Bill | None = None
 
     @property
     def accepted(self) -> bool:
         return self.grade in (GREEN, YELLOW)
 
     def headline(self) -> str:
-        euro = f"{self.profit:.2f}".replace(".", ",")
+        vorzeichen = "+" if self.profit >= 0 else "−"
+        euro = f"{abs(self.profit):.2f}".replace(".", ",")
         kosten = f"{self.total_cost:.2f}".replace(".", ",")
         return (
             f"**{_AMPEL[self.grade]}** · {self.profile.name}\n"
-            f"≈ **+{euro} € Gewinn** bei {kosten} € Gesamt-EK · {self.roi:.0f} % ROI"
+            f"≈ **{vorzeichen}{euro} € Gewinn** bei {kosten} € Gesamt-EK · "
+            f"{self.roi:.0f} % ROI"
         )
+
+    def breakdown(self) -> str:
+        """Die Rechnung zum Nachvollziehen, Zeile für Zeile."""
+        if self.bill is None:
+            return ""
+        return "\n".join(self.bill.lines())
 
 
 # Größenangaben kommen als „M", „m", „M / 38", „Größe L". Das Ziel ist, das
@@ -200,11 +310,91 @@ def ebay_sold_url(item: Item) -> str:
     )
 
 
-def evaluate(item: Item, profile: Profile) -> Verdict | None:
+def _bill(
+    item: Item, profile: Profile, *, checkout_total: float | None
+) -> tuple[Bill | None, str | None]:
+    """Die Rechnung zu einem Fund aufstellen.
+
+    Reihenfolge der Quellen, verlässlichste zuerst:
+
+    1. `checkout_total` — der abgelesene Gesamtbetrag aus dem Vinted-Checkout.
+       Der ist verbindlich; Versand und Käuferschutz stecken zusammen darin.
+    2. `item.total_price` — Vinted liefert in den Angebotsdaten den Preis
+       samt Käuferschutz. Dann wird nur noch der Versand geschätzt.
+    3. Alles geschätzt, nach den Kostensätzen des Profils.
+
+    Zweiter Rückgabewert: der Grund, warum keine Rechnung möglich war.
+    """
+    if item.price is None:
+        return None, "kein Preis angegeben"
+    kosten = profile.costs
+
+    preis = cents(item.price)
+    umrechnung: tuple[float, str, float] | None = None
+    waehrung = (item.currency or profile.currency).upper()
+    kurs = 1.0
+    if waehrung != profile.currency.upper():
+        gefunden = profile.rates.get(waehrung)
+        if not gefunden or gefunden <= 0:
+            return None, (
+                f"Preis in {waehrung}, Profil rechnet in {profile.currency} — "
+                f"Kurs fehlt in `[rates]`"
+            )
+        kurs = float(gefunden)
+        umrechnung = (preis, waehrung, kurs)
+        preis = cents(preis * kurs)
+
+    if checkout_total is not None:
+        gesamt = cents(checkout_total * kurs)
+        if gesamt < preis:
+            return None, "Checkout-Betrag liegt unter dem Artikelpreis"
+        return (
+            Bill(
+                item_price=preis,
+                shipping=0.0,
+                protection=cents(gesamt - preis),
+                refurb=cents(kosten.refurb),
+                reserve=cents(kosten.reserve),
+                resale_price=cents(profile.resale_price),
+                currency=profile.currency,
+                source=FROM_CHECKOUT,
+                converted=umrechnung,
+            ),
+            None,
+        )
+
+    if item.total_price is not None and item.total_price > item.price:
+        schutz = cents((item.total_price - item.price) * kurs)
+        quelle = FROM_VINTED
+    else:
+        schutz = kosten.protection(preis)
+        quelle = ESTIMATED
+    return (
+        Bill(
+            item_price=preis,
+            shipping=cents(kosten.shipping),
+            protection=schutz,
+            refurb=cents(kosten.refurb),
+            reserve=cents(kosten.reserve),
+            resale_price=cents(profile.resale_price),
+            currency=profile.currency,
+            source=quelle,
+            converted=umrechnung,
+        ),
+        None,
+    )
+
+
+def evaluate(
+    item: Item, profile: Profile, *, checkout_total: float | None = None
+) -> Verdict | None:
     """Einen Fund gegen ein Profil rechnen.
 
     `None`, wenn der Artikel gar nicht zum Profil gehört — dann ist er kein
     abgelehnter Deal, sondern schlicht etwas anderes.
+
+    `checkout_total` ist der im Vinted-Checkout abgelesene Gesamtbetrag. Ist
+    er bekannt, wird nichts mehr geschätzt.
     """
     titel = f"{item.title} {item.brand or ''}".lower()
 
@@ -213,7 +403,6 @@ def evaluate(item: Item, profile: Profile) -> Verdict | None:
     if profile.match_any and _contains(titel, profile.match_any) is None:
         return None
 
-    kosten = profile.costs
     grenzen = profile.thresholds
     notizen: list[str] = []
 
@@ -221,9 +410,11 @@ def evaluate(item: Item, profile: Profile) -> Verdict | None:
     if ausgeschlossen:
         return Verdict(profile, RED, 0.0, 0.0, 0.0, (f"„{ausgeschlossen}“ im Titel",))
 
-    if item.price is None:
-        return Verdict(profile, RED, 0.0, 0.0, 0.0, ("kein Preis angegeben",))
-    if profile.max_item_price and item.price > profile.max_item_price:
+    rechnung, grund = _bill(item, profile, checkout_total=checkout_total)
+    if rechnung is None:
+        return Verdict(profile, RED, 0.0, 0.0, 0.0, (grund or "keine Rechnung möglich",))
+
+    if profile.max_item_price and rechnung.item_price > cents(profile.max_item_price):
         return Verdict(
             profile,
             RED,
@@ -231,6 +422,7 @@ def evaluate(item: Item, profile: Profile) -> Verdict | None:
             0.0,
             0.0,
             (f"über der Meldegrenze von {profile.max_item_price:.0f} €",),
+            rechnung,
         )
 
     groesse = normalize_size(item.size)
@@ -247,11 +439,11 @@ def evaluate(item: Item, profile: Profile) -> Verdict | None:
             profile, RED, 0.0, 0.0, 0.0, (f"Zustand „{zustand or 'unbekannt'}“",)
         )
 
-    gesamt = kosten.total(item.price)
-    gewinn = profile.resale_price - gesamt - kosten.reserve
-    rendite = (gewinn / gesamt * 100.0) if gesamt > 0 else 0.0
+    gesamt = rechnung.total
+    gewinn = rechnung.profit
+    rendite = rechnung.roi
 
-    if profile.max_total_cost and gesamt > profile.max_total_cost:
+    if profile.max_total_cost and gesamt > cents(profile.max_total_cost):
         return Verdict(
             profile,
             RED,
@@ -259,19 +451,21 @@ def evaluate(item: Item, profile: Profile) -> Verdict | None:
             rendite,
             gesamt,
             (
-                f"geschätzter Gesamt-EK {gesamt:.2f} € über der Grenze von "
+                f"Gesamt-EK {gesamt:.2f} € über der Grenze von "
                 f"{profile.max_total_cost:.0f} €",
             ),
+            rechnung,
         )
 
-    if gewinn < grenzen.min_profit:
+    if gewinn < cents(grenzen.min_profit):
         return Verdict(
             profile,
             RED,
             gewinn,
             rendite,
             gesamt,
-            (f"nur {gewinn:.0f} € Marge, nötig sind {grenzen.min_profit:.0f} €",),
+            (f"nur {gewinn:.2f} € Marge, nötig sind {grenzen.min_profit:.2f} €",),
+            rechnung,
         )
     if rendite < grenzen.min_roi:
         return Verdict(
@@ -281,12 +475,13 @@ def evaluate(item: Item, profile: Profile) -> Verdict | None:
             rendite,
             gesamt,
             (f"nur {rendite:.0f} % ROI, nötig sind {grenzen.min_roi:.0f} %",),
+            rechnung,
         )
 
     # Ab hier ist der Fund kaufbar. Die Frage ist nur noch: grün oder gelb?
     note = GREEN
 
-    if gewinn < grenzen.green_profit:
+    if gewinn < cents(grenzen.green_profit):
         note = YELLOW
         notizen.append(
             f"Gewinn {gewinn:.2f} € nur knapp über {grenzen.min_profit:.0f} €"
@@ -311,17 +506,25 @@ def evaluate(item: Item, profile: Profile) -> Verdict | None:
             note = YELLOW
             notizen.append(f"Farbe {farbe}")
 
-    return Verdict(profile, note, gewinn, rendite, gesamt, tuple(notizen))
+    return Verdict(profile, note, gewinn, rendite, gesamt, tuple(notizen), rechnung)
 
 
-def best_verdict(item: Item, profiles: list[Profile]) -> Verdict | None:
+def best_verdict(
+    item: Item, profiles: list[Profile], *, checkout_total: float | None = None
+) -> Verdict | None:
     """Das beste Urteil über mehrere Profile hinweg.
 
     Ein Zopfmuster-Pullover mit Viertelreißverschluss passt auf zwei Profile;
     gelten soll das mit der besseren Ampel, bei Gleichstand das mit der
     höheren Marge.
     """
-    urteile = [v for v in (evaluate(item, p) for p in profiles) if v is not None]
+    urteile = [
+        v
+        for v in (
+            evaluate(item, p, checkout_total=checkout_total) for p in profiles
+        )
+        if v is not None
+    ]
     if not urteile:
         return None
     rang = {GREEN: 0, YELLOW: 1, RED: 2}

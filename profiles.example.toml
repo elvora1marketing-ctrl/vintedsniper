@@ -11,14 +11,34 @@
 # weiterhin im Panel oder per /watch an — das Profil entscheidet danach, was
 # davon einen Alert wert ist.
 
+# --------------------------------------------------------------- Währung
+# In dieser Währung stehen Verkaufspreis, Kosten und Grenzen. Funde in anderen
+# Währungen (Großbritannien, Polen, Tschechien, Schweden …) werden mit den
+# Kursen unten umgerechnet. Fehlt ein Kurs, wird nicht geraten: der Fund
+# bekommt Rot mit dem Hinweis, welcher Kurs fehlt.
+currency = "EUR"
+
+[rates]
+# Fremdwährung → EUR. Grob reicht, aber einmal im Monat nachschauen.
+GBP = 1.17
+PLN = 0.23
+CZK = 0.040
+SEK = 0.088
+DKK = 0.134
+HUF = 0.0025
+RON = 0.20
+
 # ---------------------------------------------------------------- Kosten
 # Was auf den Artikelpreis obendrauf kommt. Gilt für alle Profile, die nichts
 # Eigenes setzen.
 #
-# ACHTUNG: Schätzwerte. Vinted ändert Käuferschutz und Versandpreise, und sie
-# unterscheiden sich je Land. Prüf sie einmal an einem echten Kaufabschluss
-# gegen und trag deine Zahlen ein — an dieser Stelle entscheidet sich, ob die
-# Marge stimmt.
+# Der Käuferschutz wird nur dann geschätzt, wenn Vinted ihn nicht selbst
+# mitliefert — in den Angebotsdaten steht meist der Preis inklusive
+# Käuferschutz, und der wird genommen. Der Versand bleibt eine Schätzung,
+# bis du im Checkout den echten Betrag siehst (`/pruefen … checkout:`).
+#
+# Prüf die Sätze einmal an einem echten Kaufabschluss gegen und trag deine
+# Zahlen ein — an dieser Stelle entscheidet sich, ob die Marge stimmt.
 [costs]
 shipping = 2.99            # Standardversand
 protection_fixed = 0.70    # Käuferschutz, fixer Anteil

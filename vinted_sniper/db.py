@@ -70,6 +70,18 @@ CREATE TABLE IF NOT EXISTS price_samples (
 CREATE INDEX IF NOT EXISTS idx_price_lookup
     ON price_samples(group_key, currency, seen_at);
 
+-- Fingerabdrücke gemeldeter Artikel (Verkäufer + Titel + Größe + Preis).
+-- Ein Verkäufer, der denselben Pullover löscht und neu einstellt, bekommt
+-- eine neue Artikel-ID — aber denselben Fingerabdruck. Über alle Suchen
+-- hinweg, denn ein Artikel ist ein Artikel.
+CREATE TABLE IF NOT EXISTS seen_prints (
+    print   TEXT    PRIMARY KEY,
+    item_id TEXT    NOT NULL,
+    seen_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_prints_at ON seen_prints(seen_at);
+
 -- Kleiner Schlüssel-Wert-Speicher für Betriebszustand, allen voran das
 -- Lebenszeichen. Nach einem Absturz lässt sich daran ablesen, wie lange der
 -- Sniper weg war — der Prozess selbst weiß das nach dem Neustart nicht mehr.
@@ -443,6 +455,18 @@ class Database:
         async with self.conn.execute(sql, args) as cursor:
             return {row["item_id"] for row in await cursor.fetchall()}
 
+    async def _known_prints(self, prints: set[str]) -> dict[str, str]:
+        """Fingerabdruck → Artikel-ID für alle bereits gemeldeten Abdrücke."""
+        if not prints:
+            return {}
+        werte = sorted(prints)
+        placeholders = ",".join("?" for _ in werte)
+        async with self.conn.execute(
+            f"SELECT print, item_id FROM seen_prints WHERE print IN ({placeholders})",
+            werte,
+        ) as cursor:
+            return {row["print"]: row["item_id"] for row in await cursor.fetchall()}
+
     async def filter_new(
         self,
         watch_id: int,
@@ -450,6 +474,7 @@ class Database:
         *,
         scope: str = "watch",
         group_key: str = "",
+        prints: dict[str, str] | None = None,
     ) -> set[str]:
         """IDs zurückgeben, die gemeldet werden sollen.
 
@@ -463,6 +488,13 @@ class Database:
         Vermerkt bleiben sie trotzdem — sonst hielte sich diese Watch nach
         einem Neustart für ungeprimed und würde eine Runde stumm schlucken.
 
+        `prints` (Artikel-ID → Fingerabdruck, siehe `Item.fingerprint`) fängt
+        den Rest: denselben Artikel unter neuer ID, weil der Verkäufer ihn
+        neu eingestellt oder doppelt angelegt hat. Ein Abdruck, der schon
+        einer anderen ID gehört, wird nicht noch einmal gemeldet — in jedem
+        Modus, denn ein Artikel ist ein Artikel. Taucht derselbe Abdruck
+        zweimal im selben Durchlauf auf, kommt nur der erste durch.
+
         Die Sperre serialisiert Prüfen und Vermerken. Zwei Länderkopien, die
         im selben Moment abfragen, würden sonst beide „noch niemand hat's
         gemeldet" sehen und beide alerten.
@@ -470,6 +502,7 @@ class Database:
         self.last_duplicates = 0
         if not item_ids:
             return set()
+        prints = prints or {}
 
         async with self._write_lock:
             placeholders = ",".join("?" for _ in item_ids)
@@ -490,15 +523,39 @@ class Database:
                     watch_id, fresh, scope=scope, group_key=group_key
                 )
 
+            kandidaten = [item_id for item_id in fresh if item_id not in anderswo]
+            verwandt: set[str] = set()
+            bekannt = await self._known_prints(
+                {prints[i] for i in kandidaten if prints.get(i)}
+            )
+            in_dieser_runde: set[str] = set()
+            for item_id in kandidaten:
+                abdruck = prints.get(item_id)
+                if not abdruck:
+                    continue
+                fremd = bekannt.get(abdruck)
+                if (fremd is not None and fremd != item_id) or abdruck in in_dieser_runde:
+                    verwandt.add(item_id)
+                else:
+                    in_dieser_runde.add(abdruck)
+
             now = int(time.time())
             await self.conn.executemany(
                 "INSERT OR IGNORE INTO seen_items (watch_id, item_id, seen_at) VALUES (?, ?, ?)",
                 [(watch_id, item_id, now) for item_id in fresh],
             )
+            await self.conn.executemany(
+                "INSERT OR IGNORE INTO seen_prints (print, item_id, seen_at) VALUES (?, ?, ?)",
+                [
+                    (prints[item_id], item_id, now)
+                    for item_id in kandidaten
+                    if prints.get(item_id) and item_id not in verwandt
+                ],
+            )
             await self.conn.commit()
 
-        self.last_duplicates = len(anderswo)
-        return {item_id for item_id in fresh if item_id not in anderswo}
+        self.last_duplicates = len(anderswo) + len(verwandt)
+        return {item_id for item_id in kandidaten if item_id not in verwandt}
 
     # ------------------------------------------------------- Betriebszustand
 
@@ -600,5 +657,9 @@ class Database:
     async def prune_seen(self, older_than_days: int = 7) -> int:
         cutoff = int(time.time()) - older_than_days * 86_400
         cursor = await self.conn.execute("DELETE FROM seen_items WHERE seen_at < ?", (cutoff,))
+        entfernt = cursor.rowcount
+        # Fingerabdrücke leben genauso lang: wer denselben Pullover nach
+        # einer Woche wieder einstellt, darf wieder auffallen.
+        cursor = await self.conn.execute("DELETE FROM seen_prints WHERE seen_at < ?", (cutoff,))
         await self.conn.commit()
-        return cursor.rowcount
+        return entfernt + cursor.rowcount

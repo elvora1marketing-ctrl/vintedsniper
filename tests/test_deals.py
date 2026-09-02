@@ -316,3 +316,158 @@ class MaxBuyPriceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BillTests(unittest.TestCase):
+    """Die Rechnung hinter dem Urteil — jeder Posten nachvollziehbar."""
+
+    def setUp(self):
+        self.zip_profil, _ = load_profiles(BEISPIEL)
+
+    def test_cent_rundung_kaufmaennisch(self):
+        self.assertEqual(deals.cents(1.005), 1.01)
+        self.assertEqual(deals.cents(1.004), 1.0)
+        self.assertEqual(deals.cents(11.999999), 12.0)
+
+    def test_geschaetzt_wenn_vinted_nichts_liefert(self):
+        fund = Item(**{**item(preis=9.0).__dict__, "total_price": None})
+        u = deals.evaluate(fund, self.zip_profil)
+        self.assertEqual(u.bill.source, deals.ESTIMATED)
+        # 0,70 + 5 % von 9 = 1,15
+        self.assertEqual(u.bill.protection, 1.15)
+        self.assertEqual(u.bill.shipping, 2.99)
+        self.assertEqual(u.total_cost, 13.14)
+        self.assertEqual(u.profit, 14.86)
+
+    def test_kaeuferschutz_von_vinted_schlaegt_die_schaetzung(self):
+        # Vinted liefert 9,00 → 10,10 inkl. Käuferschutz: dann sind es 1,10,
+        # nicht die geschätzten 1,15.
+        fund = Item(**{**item(preis=9.0).__dict__, "total_price": 10.10})
+        u = deals.evaluate(fund, self.zip_profil)
+        self.assertEqual(u.bill.source, deals.FROM_VINTED)
+        self.assertEqual(u.bill.protection, 1.10)
+        self.assertEqual(u.total_cost, 9.0 + 2.99 + 1.10)
+
+    def test_checkout_betrag_ersetzt_alles(self):
+        fund = item(preis=9.0)
+        u = deals.evaluate(fund, self.zip_profil, checkout_total=14.49)
+        self.assertEqual(u.bill.source, deals.FROM_CHECKOUT)
+        self.assertEqual(u.total_cost, 14.49)
+        self.assertEqual(u.profit, 13.51)
+        self.assertIn("laut Checkout", u.breakdown())
+
+    def test_checkout_unter_artikelpreis_ist_unsinn(self):
+        u = deals.evaluate(item(preis=9.0), self.zip_profil, checkout_total=5.0)
+        self.assertEqual(u.grade, deals.RED)
+        self.assertIn("Checkout", u.notes[0])
+
+    def test_rechnung_steht_im_alert(self):
+        text = deals.evaluate(item(preis=9.0), self.zip_profil).breakdown()
+        self.assertIn("9,00 € Artikel", text)
+        self.assertIn("2,99 € Versand", text)
+        self.assertIn("Gesamt-EK", text)
+        self.assertIn("31,00 € VK", text)
+        self.assertIn("Reserve", text)
+        self.assertIn("Gewinn", text)
+        self.assertIn("ROI", text)
+
+    def test_rot_vor_der_rechnung_hat_keine_rechnung(self):
+        u = deals.evaluate(item(groesse="S"), self.zip_profil)
+        self.assertIsNone(u.bill)
+        self.assertEqual(u.breakdown(), "")
+
+    def test_rot_nach_der_rechnung_zeigt_sie_trotzdem(self):
+        # Wer sehen will, warum es nicht reicht, braucht die Zahlen.
+        knapp = deals.Profile(
+            name="knapp", match_any=("quarter zip",), resale_price=20.0
+        )
+        u = deals.evaluate(item(preis=9.0), knapp)
+        self.assertEqual(u.grade, deals.RED)
+        self.assertIsNotNone(u.bill)
+        self.assertIn("Gewinn", u.breakdown())
+
+    def test_verlust_wird_mit_minus_gezeigt(self):
+        verlust = deals.Profile(name="v", match_any=("quarter zip",), resale_price=5.0)
+        u = deals.evaluate(item(preis=9.0), verlust)
+        self.assertLess(u.profit, 0)
+        self.assertIn("−", u.headline())
+        self.assertIn("−", u.breakdown())
+
+
+class CurrencyTests(unittest.TestCase):
+    """Funde in Fremdwährung werden umgerechnet — oder ehrlich abgelehnt."""
+
+    def setUp(self):
+        self.zip_profil, _ = load_profiles(BEISPIEL)
+
+    def fund(self, preis, waehrung):
+        return Item(**{**item(preis=preis).__dict__, "currency": waehrung,
+                       "total_price": None})
+
+    def test_ohne_kurs_kein_raten(self):
+        ohne = deals.Profile(
+            name="x", match_any=("quarter zip",), resale_price=31.0, rates={}
+        )
+        u = deals.evaluate(self.fund(8.0, "GBP"), ohne)
+        self.assertEqual(u.grade, deals.RED)
+        self.assertIn("GBP", u.notes[0])
+        self.assertIn("Kurs", u.notes[0])
+
+    def test_mit_kurs_wird_umgerechnet(self):
+        u = deals.evaluate(self.fund(8.0, "GBP"), self.zip_profil)
+        self.assertEqual(u.bill.converted, (8.0, "GBP", 1.17))
+        self.assertEqual(u.bill.item_price, 9.36)
+        self.assertIn("8,00 GBP × 1.17", u.breakdown())
+        self.assertTrue(u.accepted)
+
+    def test_meldegrenze_gilt_nach_umrechnung(self):
+        # 9 GBP sind 10,53 € — über der 10-€-Grenze, auch wenn 9 < 10.
+        u = deals.evaluate(self.fund(9.0, "GBP"), self.zip_profil)
+        self.assertEqual(u.grade, deals.RED)
+        self.assertIn("Meldegrenze", u.notes[0])
+
+    def test_profilwaehrung_braucht_keinen_kurs(self):
+        u = deals.evaluate(self.fund(9.0, "eur"), self.zip_profil)
+        self.assertIsNone(u.bill.converted)
+        self.assertTrue(u.accepted)
+
+    def test_kurse_aus_der_datei(self):
+        profile = load_profiles(BEISPIEL)
+        self.assertEqual(profile[0].currency, "EUR")
+        self.assertEqual(profile[0].rates["GBP"], 1.17)
+        self.assertNotIn("EUR", profile[0].rates)
+
+
+class RatesFileTests(ProfileFileTests):
+    def test_kurs_null_wird_abgelehnt(self):
+        with self.assertRaises(InvalidProfileFile):
+            load_profiles(self.schreiben(
+                '[rates]\nGBP = 0\n[[profile]]\nname = "x"\nresale_price = 10\n'
+            ))
+
+    def test_kaputte_waehrung(self):
+        with self.assertRaises(InvalidProfileFile):
+            load_profiles(self.schreiben(
+                'currency = "Euro"\n[[profile]]\nname = "x"\nresale_price = 10\n'
+            ))
+
+    def test_eigene_waehrung(self):
+        profile = load_profiles(self.schreiben(
+            'currency = "gbp"\n[rates]\nEUR = 0.85\n'
+            '[[profile]]\nname = "x"\nresale_price = 10\n'
+        ))
+        self.assertEqual(profile[0].currency, "GBP")
+        self.assertEqual(profile[0].rates, {"EUR": 0.85})
+
+
+class MaxBuyPriceExactTests(unittest.TestCase):
+    def test_grenze_ist_auf_den_cent_genau(self):
+        # Ohne Deckel bindet die Marge: bei der Grenze ≥ 12 €, einen Cent
+        # darüber nicht mehr.
+        frei = deals.Profile(name="frei", match_any=("quarter zip",), resale_price=31.0)
+        grenze = deals.max_buy_price(frei)
+        self.assertEqual(grenze, round(grenze, 2))
+        bei = deals.evaluate(item(preis=grenze), frei)
+        self.assertGreaterEqual(bei.profit, 12.0)
+        darueber = deals.evaluate(item(preis=grenze + 0.01), frei)
+        self.assertEqual(darueber.grade, deals.RED)

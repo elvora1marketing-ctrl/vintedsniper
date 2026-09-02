@@ -410,19 +410,46 @@ Der Sniper rechnet dann jeden Fund durch und vergibt eine Ampel:
 Gerechnet wird so:
 
 ```
-konservativer VK − (Artikel + Versand + Käuferschutz + Aufbereitung) − Reserve
+Gesamt-EK = Artikel + Versand + Käuferschutz + Aufbereitung
+Gewinn    = konservativer VK − Gesamt-EK − Reserve
+ROI       = Gewinn / Gesamt-EK
 ```
 
-Jeder Alert nennt Gewinn, Gesamt-EK und ROI, hängt die 90-Sekunden-Prüfliste an
-und verlinkt die eBay-Suche nach **tatsächlich verkauften** Vergleichsartikeln.
+Jeder Alert zeigt die **Rechnung** dazu, Posten für Posten:
+
+```
+9,00 € Artikel + 2,99 € Versand (geschätzt) + 1,10 € Käuferschutz (laut Vinted) = 13,09 € Gesamt-EK
+31,00 € VK − 13,09 € − 3,00 € Reserve = +14,91 € Gewinn (114 % ROI)
+```
+
+Dazu Gewinn, Gesamt-EK und ROI in der Kopfzeile, die 90-Sekunden-Prüfliste und
+der Link auf die eBay-Suche nach **tatsächlich verkauften** Vergleichsartikeln.
 Bei Gelb liegt die Nachfrage an den Verkäufer fertig zum Kopieren dabei.
 
-**Drei Dinge, die die Ampel nicht kann.** Die Versand- und Käuferschutzkosten
-sind Schätzwerte — verbindlich ist der Betrag im Vinted-Checkout, und der
-gehört vor jedem Kauf angesehen. Echtheit, Pflegeetikett, Löcher und
-ausgeleierte Bündchen sieht nur ein Mensch auf den Fotos. Und ob ein Verkäufer
-zehn angeblich neue Teile derselben Marke anbietet, steht nicht in den
-Angebotsdaten. Die Ampel sagt „hinschauen lohnt sich", nicht „kaufen".
+**Woher die Zahlen kommen.** Alle Beträge werden kaufmännisch auf den Cent
+gerundet, bevor verglichen wird — eine Marge von 11,999 € ist keine 12 €, aber
+auch kein Rundungszufall. Die Quellen, verlässlichste zuerst:
+
+1. **Checkout-Betrag** — `/pruefen … checkout:` mit dem im Vinted-Checkout
+   abgelesenen Gesamtbetrag. Dann wird nichts mehr geschätzt.
+2. **Käuferschutz laut Vinted** — die Angebotsdaten enthalten meist den Preis
+   inklusive Käuferschutz. Der wird genommen; geschätzt wird nur noch der
+   Versand. Im Alert steht dann „laut Vinted".
+3. **Alles geschätzt** — nach den Sätzen in `profiles.toml`. Im Alert steht
+   „geschätzt".
+
+**Andere Währungen.** Ein Fund aus Großbritannien oder Polen kommt in GBP oder
+PLN. Er wird mit den Kursen aus `[rates]` in die Profilwährung umgerechnet,
+und die Rechnung zeigt es: „8,00 GBP × 1.17 = 9,36 € Artikel". Fehlt der Kurs,
+wird nicht geraten: der Fund bekommt Rot mit dem Hinweis, welcher Kurs fehlt.
+Für die EUR-Länder stellt sich die Frage nicht.
+
+**Drei Dinge, die die Ampel nicht kann.** Der Versand bleibt eine Schätzung,
+bis du ihn im Checkout siehst — und der Checkout gehört vor jedem Kauf
+angesehen. Echtheit, Pflegeetikett, Löcher und ausgeleierte Bündchen sieht
+nur ein Mensch auf den Fotos. Und ob ein Verkäufer zehn angeblich neue Teile
+derselben Marke anbietet, steht nicht in den Angebotsdaten. Die Ampel sagt
+„hinschauen lohnt sich", nicht „kaufen".
 
 **Der Sniper kauft nichts.** Er meldet, sonst nichts — und das bleibt so.
 
@@ -525,10 +552,22 @@ Zwei Dinge, die dabei wichtig sind:
 - **Jeder Artikel wird trotzdem nur einmal gemeldet.** Vinted vergibt
   Artikel-IDs länderübergreifend: derselbe Artikel hat auf `.de` und `.fr`
   dieselbe ID, und ohne Gegenmaßnahme meldete ihn jede Länderkopie einzeln —
-  bei sieben Ländern also siebenmal. Alle Kopien einer Suche teilen deshalb
-  eine Kennung und einen gemeinsamen Merkzettel; wer zuerst hinschaut, meldet.
-  Über `DEDUPE_SCOPE` lässt sich das auf **alle** Suchen ausweiten (`all`) oder
-  abschalten (`watch`).
+  bei sieben Ländern also siebenmal. Und wer drei sich überschneidende Suchen
+  hat („Quarter Zip", „Half Zip", „Ralph Lauren Pullover"), bekäme ihn noch
+  dreimal öfter. Deshalb gilt standardmäßig `DEDUPE_SCOPE=all`: ein Artikel,
+  ein Alert, egal aus wie vielen Suchen und Ländern. Wer zuerst hinschaut,
+  meldet. `group` beschränkt das auf die Länderkopien derselben Suche,
+  `watch` schaltet es ab.
+- **Auch unter neuer ID nicht.** Verkäufer löschen Artikel und stellen sie neu
+  ein, um oben zu landen, oder legen denselben Pullover zweimal an — neue ID,
+  gleicher Artikel. Der Sniper erkennt das an Verkäufer, Titel, Größe und
+  Preis und meldet nicht noch einmal, in jedem Modus. Nur wenn der Preis
+  gesunken ist, kommt der Fund wieder durch: das ist eine Nachricht wert.
+- **Im Log steht, was gilt.** Beim Start meldet der Sniper
+  `Entdopplung: Modus all — 18 Suche(n) in 3 Gruppe(n)`. Wer trotzdem
+  Doppel-Alerts sieht, schaut zuerst dorthin: `docker compose logs | grep
+  Entdopplung`. Im Panel zeigt jede Suche „N doppelt" — so viel hat sie
+  gefunden, das eine andere schon gemeldet hatte.
 - **Preisfilter hängen an der Währung.** Kategorie-, Marken- und Größen-IDs
   sind bei Vinted länderübergreifend dieselben, die Währung nicht. Geht eine
   Suche mit Preisgrenze nach Polen oder Großbritannien, wird die ursprüngliche
@@ -672,7 +711,7 @@ Alles über `.env` (siehe `.env.example`). Mindestens eines von `ALERT_WEBHOOK_U
 | `PANEL_DOMAIN` | — | Domain fürs Panel. Nur für den mitgelieferten Caddy (`--profile standalone`); ein vorhandener Reverse-Proxy kennt seine Domain selbst. |
 | `PANEL_PORT` | `8080` | Port auf `127.0.0.1` des Hosts. Nur bei Konflikten ändern. |
 | `EXTRA_COUNTRIES` | — | Länder, in denen **jede** Suche zusätzlich läuft, z. B. `fr,nl,it`. Leer = nur die Domain aus der Such-URL. |
-| `DEDUPE_SCOPE` | `group` | Wie weit ein gemeldeter Artikel andere Suchen stummschaltet: `group` = die Länderkopien derselben Suche, `all` = jede Suche, `watch` = gar nicht. |
+| `DEDUPE_SCOPE` | `all` | Wie weit ein gemeldeter Artikel andere Suchen stummschaltet: `all` = jede Suche und jedes Land, `group` = nur die Länderkopien derselben Suche, `watch` = gar nicht. Neueinstellungen desselben Artikels werden in jedem Modus zusammengefasst. |
 | `ALERT_MENTION` | — | Wer bei einem Ausfall angepingt wird. Benutzer-IDs, komma-getrennt, oder `@here`. |
 | `HEALTH_CHANNEL` | — | Channel-ID für Ausfallmeldungen. Leer = Channel der ersten Suche bzw. Webhook. |
 | `HEALTH_STALE_AFTER` | `900` | Ab wann eine Suche als „meldet nichts mehr" gilt (Sekunden). |

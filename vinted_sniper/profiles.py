@@ -103,6 +103,8 @@ def load_profiles(path: Path, *, allow_missing: bool = True) -> list[Profile]:
 
     basis_costs = _costs(data.get("costs") or {}, "[costs]", Costs())
     basis_grenzen = _thresholds(data.get("thresholds") or {}, "[thresholds]", Thresholds())
+    waehrung = _currency(data.get("currency"), "currency")
+    kurse = _rates(data.get("rates"), waehrung)
 
     roh = data.get("profile")
     if roh is None:
@@ -161,7 +163,36 @@ def load_profiles(path: Path, *, allow_missing: bool = True) -> list[Profile]:
                 thresholds=_thresholds(
                     eintrag.get("thresholds") or {}, position, basis_grenzen
                 ),
+                currency=waehrung,
+                rates=kurse,
             )
         )
 
     return profile
+
+
+def _currency(raw: Any, key: str) -> str:
+    if raw is None:
+        return "EUR"
+    if not isinstance(raw, str) or len(raw.strip()) != 3:
+        raise InvalidProfileFile(f"`{key}` muss ein Währungskürzel wie EUR sein.")
+    return raw.strip().upper()
+
+
+def _rates(raw: Any, currency: str) -> dict[str, float]:
+    """`[rates]`: Fremdwährung → Profilwährung.
+
+    Ein Kurs von 0 oder darunter ist kein Kurs. Und die Profilwährung selbst
+    braucht keinen — 1,0 wird immer angenommen.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise InvalidProfileFile("`[rates]` muss ein Block mit `GBP = 1.17` usw. sein.")
+    kurse: dict[str, float] = {}
+    for code, wert in raw.items():
+        if isinstance(wert, bool) or not isinstance(wert, (int, float)) or wert <= 0:
+            raise InvalidProfileFile(f"[rates]: `{code}` muss eine Zahl über 0 sein.")
+        kurse[str(code).strip().upper()] = float(wert)
+    kurse.pop(currency, None)
+    return kurse

@@ -130,3 +130,39 @@ class ItemDisplayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FingerprintTests(unittest.TestCase):
+    """Der Fingerabdruck erkennt denselben Artikel unter neuer ID."""
+
+    def item(self, **aenderungen):
+        roh = {**FULL_PAYLOAD, **aenderungen}
+        item = Item.parse(roh, aenderungen.pop("host", "www.vinted.de"), "EUR")
+        assert item is not None
+        return item
+
+    def test_id_und_land_spielen_keine_rolle(self):
+        a = Item.parse(FULL_PAYLOAD, "www.vinted.de", "EUR")
+        b = Item.parse({**FULL_PAYLOAD, "id": 9999}, "www.vinted.fr", "EUR")
+        self.assertEqual(a.fingerprint(), b.fingerprint())
+        self.assertTrue(a.fingerprint())
+
+    def test_satzzeichen_und_grossschreibung_egal(self):
+        a = self.item(title="Nike Air Max 90")
+        b = self.item(title="NIKE  air-max 90 !!!")
+        self.assertEqual(a.fingerprint(), b.fingerprint())
+
+    def test_anderer_preis_ist_ein_anderer_abdruck(self):
+        # Billiger neu eingestellt ist eine Nachricht wert.
+        a = self.item()
+        b = self.item(price={"amount": "40.0", "currency_code": "EUR"})
+        self.assertNotEqual(a.fingerprint(), b.fingerprint())
+
+    def test_anderer_verkaeufer_ist_ein_anderer_artikel(self):
+        a = self.item()
+        b = self.item(user={"login": "jemandanders"})
+        self.assertNotEqual(a.fingerprint(), b.fingerprint())
+
+    def test_ohne_verkaeufer_kein_abdruck(self):
+        ohne = self.item(user={})
+        self.assertEqual(ohne.fingerprint(), "")

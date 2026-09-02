@@ -69,6 +69,21 @@ class Monitor:
             if watch.enabled:
                 self.start(watch)
                 started += 1
+        # Im Log nachlesbar, was die Entdopplung gerade abdeckt. Wer trotzdem
+        # Doppel-Alerts sieht, sieht hier als Erstes, ob der Modus stimmt.
+        gruppen = {watch.group_key for watch in watches if watch.enabled}
+        log.info(
+            "Entdopplung: Modus %s — %d Suche(n) in %d Gruppe(n)%s.",
+            self.settings.dedupe_scope,
+            started,
+            len(gruppen),
+            (
+                ", " + str(sum(1 for w in watches if w.enabled and not w.group_key))
+                + " ohne Gruppenkennung"
+                if any(w.enabled and not w.group_key for w in watches)
+                else ""
+            ),
+        )
         if self._housekeeping is None:
             self._housekeeping = asyncio.create_task(self._housekeeping_loop())
         return started
@@ -165,6 +180,7 @@ class Monitor:
                     [item.id for item in items],
                     scope=self.settings.dedupe_scope,
                     group_key=watch.group_key,
+                    prints={item.id: item.fingerprint() for item in items},
                 )
                 # Wie viel diese Suche beigetragen hat, das nicht ohnehin eine
                 # Schwestersuche gefunden hätte. Bei Länderkopien ist das die
@@ -234,7 +250,7 @@ class Monitor:
                 verworfen += 1
                 continue
             bewertet.append(
-                (0 if urteil.grade == "A" else 1, -urteil.profit,
+                (0 if urteil.grade == deals.GREEN else 1, -urteil.profit,
                  replace(item, verdict=urteil))
             )
 

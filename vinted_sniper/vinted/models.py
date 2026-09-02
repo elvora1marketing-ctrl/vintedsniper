@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
+
+# Alles, was keinen Buchstaben oder keine Ziffer darstellt — Satzzeichen,
+# Emojis, doppelte Leerzeichen. Für den Fingerabdruck zählt nur der Text.
+_NICHT_WORT = re.compile(r"[^\w]+", re.UNICODE)
 
 
 def _money(raw: Any) -> tuple[float | None, str | None]:
@@ -62,6 +68,30 @@ class Item:
         if self.posted_ts is None:
             return None
         return max(0, int(time.time()) - self.posted_ts)
+
+    def fingerprint(self) -> str:
+        """Kennung, die ein Artikel auch nach dem Neu-Einstellen behält.
+
+        Die Artikel-ID reicht nicht: Verkäufer löschen und stellen neu ein,
+        um oben zu landen, oder legen denselben Pullover zweimal an. Der
+        Fingerabdruck fasst Verkäufer, Titel, Größe und Preis zusammen —
+        dieselbe Kombination ist derselbe Artikel, egal welche ID er trägt.
+
+        Ohne Verkäufer gibt es keinen Fingerabdruck. Zwei verschiedene Leute
+        mit demselben Titel zum selben Preis sind zwei Artikel, und ohne den
+        Verkäufer ließe sich das nicht auseinanderhalten.
+
+        Der Preis gehört hinein: eine Neueinstellung *billiger* ist eine
+        Nachricht wert, dieselbe zum selben Preis nicht.
+        """
+        verkaeufer = (self.seller or "").strip().lower()
+        if not verkaeufer:
+            return ""
+        titel = " ".join(_NICHT_WORT.split(self.title.lower())).strip()
+        groesse = (self.size or "").strip().lower()
+        preis = f"{self.price:.2f}" if self.price is not None else "-"
+        roh = f"{verkaeufer}|{titel}|{groesse}|{preis}|{self.currency}"
+        return hashlib.sha1(roh.encode("utf-8")).hexdigest()[:24]
 
     def price_label(self) -> str:
         if self.price is None:

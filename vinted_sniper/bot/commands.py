@@ -587,7 +587,7 @@ class EvaluateCommand(commands.Cog):
             title=titel,
             url=url or "",
             price=preis,
-            total_price=checkout,
+            total_price=None,
             currency="EUR",
             brand=None,
             size=groesse,
@@ -600,7 +600,9 @@ class EvaluateCommand(commands.Cog):
             posted_ts=None,
         )
 
-        urteil = deals.best_verdict(fund, profile)
+        # Der abgelesene Checkout-Betrag ist der ganze Betrag — Artikel,
+        # Versand, Käuferschutz. Er ersetzt die Schätzung komplett.
+        urteil = deals.best_verdict(fund, profile, checkout_total=checkout)
         if urteil is None:
             namen = ", ".join(p.name for p in profile)
             await interaction.response.send_message(
@@ -629,6 +631,9 @@ class EvaluateCommand(commands.Cog):
                 value="\n".join(f"• {n}" for n in urteil.notes),
                 inline=False,
             )
+        rechnung = urteil.breakdown()
+        if rechnung:
+            embed.add_field(name="Rechnung", value=rechnung, inline=False)
         embed.add_field(
             name="Dein maximaler Artikelpreis",
             value=(
