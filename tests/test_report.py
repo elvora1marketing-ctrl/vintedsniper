@@ -93,9 +93,6 @@ class ReportTests(unittest.TestCase):
         self.assertIn("**Länder:** 🇩🇪 de", text)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class WindowAndTrafficRowTests(unittest.TestCase):
     def zeile(self, zeilen, label):
@@ -130,3 +127,7 @@ class WindowAndTrafficRowTests(unittest.TestCase):
         self.assertIn("12 h am Tag", text)
         # 1 Suche, alle 60 s, halber Tag: 720 Abfragen × 50 KB × 30 Tage ≈ 1,0 GB
         self.assertIn("1,0 GB", text)
+
+
+if __name__ == "__main__":
+    unittest.main()
