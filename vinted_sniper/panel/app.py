@@ -242,7 +242,9 @@ class PanelServer:
         Kommt sowohl mit Ankreuzfeldern (mehrfach `laender`) als auch mit einem
         getippten `fr, nl, it` zurecht.
         """
-        werte = form.getall("laender") if hasattr(form, "getall") else []
+        # `getall` ohne Vorgabe wirft KeyError, wenn kein Feld angekreuzt
+        # ist — also im häufigsten Fall.
+        werte = form.getall("laender", []) if hasattr(form, "getall") else []
         text = ",".join(str(w) for w in werte) or str(form.get("laender", ""))
         return domains.parse_list(text)
 
