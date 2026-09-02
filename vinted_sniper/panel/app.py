@@ -67,7 +67,9 @@ class PanelServer:
     # ----------------------------------------------------------------- Aufbau
 
     def _build_app(self) -> web.Application:
-        app = web.Application(middlewares=[self._auth_middleware])
+        app = web.Application(
+            middlewares=[self._error_middleware, self._auth_middleware]
+        )
         app.add_routes(
             [
                 web.get("/", self.dashboard),
@@ -105,6 +107,30 @@ class PanelServer:
             self._runner = None
 
     # ------------------------------------------------------------------- Auth
+
+    @web.middleware
+    async def _error_middleware(
+        self, request: web.Request, handler: Handler
+    ) -> web.StreamResponse:
+        """Aus einem Absturz eine lesbare Seite machen.
+
+        Ein nacktes „500 Internal Server Error" sagt niemandem, was los ist.
+        Hier steht stattdessen der Fehler samt Fundstelle und dem Befehl, mit
+        dem man das ganze Protokoll bekommt — und im Log der volle Traceback.
+        """
+        try:
+            return await handler(request)
+        except web.HTTPException:
+            # Weiterleitungen und Co. sind keine Fehler.
+            raise
+        except Exception as exc:
+            log.exception("Panel: %s %s ist abgestürzt.", request.method, request.path)
+            return web.Response(
+                text=views.error_page(exc, request.path),
+                status=500,
+                content_type="text/html",
+                charset="utf-8",
+            )
 
     @web.middleware
     async def _auth_middleware(

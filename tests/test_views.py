@@ -72,3 +72,20 @@ class DashboardRenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ErrorPageTests(unittest.TestCase):
+    def test_zeigt_fehler_und_stelle(self):
+        try:
+            raise NameError("name 'beitrag' is not defined")
+        except NameError as exc:
+            html = views.error_page(exc, "/")
+        self.assertIn("NameError", html)
+        self.assertIn("beitrag", html)
+        self.assertIn("test_views.py, Zeile", html)
+        self.assertIn("docker compose logs", html)
+
+    def test_nutzereingaben_werden_maskiert(self):
+        html = views.error_page(ValueError("<script>x</script>"), "/<b>")
+        self.assertNotIn("<script>", html)
+        self.assertNotIn("/<b>", html)

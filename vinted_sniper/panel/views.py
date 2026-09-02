@@ -461,6 +461,36 @@ def _page(title: str, body: str) -> str:
     )
 
 
+def error_page(exc: BaseException, path: str) -> str:
+    """Absturzseite: was, wo, und wie man mehr erfährt."""
+    import traceback
+
+    stelle = ""
+    frames = traceback.extract_tb(exc.__traceback__)
+    if frames:
+        letzte = frames[-1]
+        stelle = f"{letzte.filename.rsplit('/', 1)[-1]}, Zeile {letzte.lineno}"
+    return _page(
+        "Fehler · Vinted Sniper",
+        f"""
+        <header class=top>
+          <div class=brand>{_MARK}<div><h1>Vinted Sniper</h1><p>Da ist etwas schiefgegangen.</p></div></div>
+        </header>
+        <div class="flash bad"><span class=icon>⚠</span>
+          <div><b>{escape(type(exc).__name__)}</b>: {escape(str(exc) or "ohne Meldung")}
+          {f"<br><span class=meta>in {escape(stelle)}</span>" if stelle else ""}
+          <br><span class=meta>bei {escape(path)}</span></div>
+        </div>
+        <div class=card>
+          <div class=meta>Das vollständige Protokoll steht im Log:</div>
+          <pre><code>docker compose logs --tail 80 sniper</code></pre>
+          <div class=meta>Die Suchen und Alerts laufen davon unabhängig weiter.
+          <a href="/">Zurück zur Übersicht</a></div>
+        </div>
+        """,
+    )
+
+
 def login_page(*, error: str | None = None) -> str:
     warn = (
         f'<div class="flash bad"><span class=icon>⚠</span><div>{escape(error)}</div></div>'
