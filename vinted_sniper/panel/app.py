@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 from aiohttp import web
 
-from .. import bulk
+from .. import bulk, report
 from ..db import Database
 from ..monitor import Monitor
 from ..vinted import domains
@@ -45,6 +45,7 @@ class PanelServer:
         default_interval: int,
         started_at: Any,
         default_countries: tuple[str, ...] = (),
+        settings: Any = None,
     ) -> None:
         self.db = db
         self.monitor = monitor
@@ -57,6 +58,9 @@ class PanelServer:
         self.default_interval = default_interval
         self.started_at = started_at
         self.default_countries = default_countries
+        # Für den Betriebsbericht auf der Übersicht. Ohne Einstellungen
+        # (Tests) fehlt nur der Kasten.
+        self.settings = settings
 
         self._runner: web.AppRunner | None = None
 
@@ -166,6 +170,11 @@ class PanelServer:
     async def dashboard(self, request: web.Request) -> web.StreamResponse:
         watches = await self.db.list_watches()
         running = {w.id for w in watches if self.monitor.is_running(w.id)}
+        betrieb = (
+            report.rows(self.settings, watches, self.monitor.profiles)
+            if self.settings is not None
+            else []
+        )
         return web.Response(
             text=views.dashboard(
                 watches=watches,
@@ -176,6 +185,7 @@ class PanelServer:
                 error=request.query.get("err"),
                 default_countries=self.default_countries,
                 traffic_line=self.client.pool.meter.summary(),
+                betrieb=betrieb,
             ),
             content_type="text/html",
             charset="utf-8",

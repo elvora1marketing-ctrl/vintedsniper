@@ -14,6 +14,7 @@ import datetime as dt
 from html import escape
 
 from ..db import Watch
+from ..report import Row
 from ..vinted import domains
 
 _STYLE = """
@@ -190,6 +191,14 @@ code {
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
 .session b { font-weight: 600; }
 .session span { color: var(--muted); overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- Betrieb */
+
+.betrieb { display: grid; grid-template-columns: max-content 1fr; gap: 7px 14px; font-size: 13.5px; }
+.betrieb b { font-weight: 600; white-space: nowrap; }
+.betrieb span { color: var(--muted); overflow-wrap: anywhere; }
+.betrieb .warn b, .betrieb .warn span { color: var(--danger); }
+.betrieb .warn span::before { content: "⚠ "; }
 
 /* ------------------------------------------------------------------ Suchen */
 
@@ -507,6 +516,14 @@ def _watch_card(watch: Watch, running: bool) -> str:
     )
     umschalten = "Fortsetzen" if not watch.enabled else "Pause"
     sep = '<span class=sep>·</span>'
+    # Wie oft diese Suche fand, was eine andere schon gemeldet hatte. Bei
+    # Länderkopien die Zahl, an der man sieht, ob sie sich lohnen.
+    beitrag = (
+        f'{sep}<span title="Funde, die eine andere Suche schon gemeldet hatte">'
+        f"{watch.dupes} doppelt</span>"
+        if watch.dupes
+        else ""
+    )
 
     return f"""
     <div class=card>
@@ -551,6 +568,7 @@ def dashboard(
     error: str | None = None,
     default_countries: tuple[str, ...] = (),
     traffic_line: str = "",
+    betrieb: list[Row] | None = None,
 ) -> str:
     flash = ""
     if error:
@@ -591,6 +609,20 @@ def dashboard(
         for host, state in sessions.items()
     ) or '<div class=meta>Noch keine Verbindung aufgebaut.</div>'
 
+    # Was gilt, steht hier — nicht in der .env. Markiert ist, was man
+    # wahrscheinlich nicht so wollte.
+    bericht = (
+        "<div class=card><h2 style='margin-top:0'>Betrieb</h2><div class=betrieb>"
+        + "".join(
+            f"<div class={'warn' if z.warn else 'ok'}><b>{escape(z.label)}</b></div>"
+            f"<div class={'warn' if z.warn else 'ok'}><span>{escape(z.value)}</span></div>"
+            for z in betrieb
+        )
+        + "</div></div>"
+        if betrieb
+        else ""
+    )
+
     return _page(
         "Vinted Sniper",
         f"""
@@ -615,6 +647,8 @@ def dashboard(
           <div class=stat><b>{treffer}</b><span>Treffer</span></div>
           <div class=stat><b>{laufzeit_text}</b><span>Laufzeit</span></div>
         </div>
+
+        {bericht}
 
         <div class=card>
           <div class=sessions>{zustand}</div>

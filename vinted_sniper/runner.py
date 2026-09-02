@@ -13,7 +13,7 @@ import logging
 
 import discord
 
-from . import embeds
+from . import embeds, report
 
 from .config import Settings
 from .db import Database, DatabaseUnavailable
@@ -84,6 +84,7 @@ async def run_webhook_mode(settings: Settings) -> int:
         default_interval=settings.default_interval,
         started_at=dt.datetime.now(dt.timezone.utc),
         default_countries=settings.extra_countries,
+        settings=settings,
     )
 
     try:
@@ -118,6 +119,13 @@ async def run_webhook_mode(settings: Settings) -> int:
         monitor.profiles = profile
         started = await monitor.start_all()
         log.info("%d Suche(n) laufen. Beenden mit Strg-C.", started)
+
+        # Was gilt, sagt der Sniper selbst — niemand soll dafür in die .env
+        # schauen müssen.
+        zeilen = report.rows(settings, await db.list_watches(), profile)
+        await melde_zustand(
+            report.title(zeilen), report.discord_text(zeilen), report.is_alarm(zeilen)
+        )
 
         # Der Prozess lebt nur für die Monitor-Tasks; hier warten wir auf das
         # Signal von außen.

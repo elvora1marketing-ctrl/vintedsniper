@@ -290,6 +290,21 @@ hängt die Antibot-Prüfung.
 
 ---
 
+## Was gerade gilt, sagt der Sniper selbst
+
+Bei jedem Start schreibt der Sniper einen Bericht in den Discord-Channel und
+zeigt ihn im Panel unter „Betrieb": ob abgefragt wird und wie oft, in welchen
+Ländern, wie entdoppelt wird, welche Kaufprofile greifen, wer bei einem
+Ausfall getaggt wird, ob aufgeräumt wird, wie viele Proxy-Sitzungen laufen,
+ob der Totmannschalter an ist. Was man so wahrscheinlich nicht wollte, ist
+mit ⚠️ markiert. Steht die Abfrage auf `POLLING=off`, kommt der Bericht als
+Ausfallmeldung mit Erwähnung: der Sniper sucht dann nicht, und das soll
+niemand erst nach drei stillen Tagen merken.
+
+Niemand muss dafür in die `.env` schauen oder einen Befehl eingeben.
+
+---
+
 ## Merken, wenn der Sniper ausfällt
 
 Ein Sniper, der still ausfällt, ist schlimmer als keiner: man verlässt sich auf

@@ -9,7 +9,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from .. import embeds
+from .. import embeds, report
 from . import cleanup
 from ..config import Settings
 from ..db import Database, Watch
@@ -70,6 +70,7 @@ class SniperBot(commands.Bot):
             default_interval=settings.default_interval,
             started_at=self.started_at,
             default_countries=settings.extra_countries,
+            settings=settings,
         )
         self.watchdog = Watchdog(settings, self.db, send=self._deliver_health)
         self._send_lock = asyncio.Lock()
@@ -194,6 +195,7 @@ class SniperBot(commands.Bot):
 
         await self.watchdog.report_downtime()
         self.watchdog.start()
+        await self._report_startup()
 
         if self.settings.alert_retention_hours:
             self._cleanup_task = self.loop.create_task(self._cleanup_loop())
@@ -262,6 +264,18 @@ class SniperBot(commands.Bot):
                 # nicht mitreißen.
                 log.exception("Aufräumen fehlgeschlagen.")
             await asyncio.sleep(CLEANUP_EVERY)
+
+    async def _report_startup(self) -> None:
+        """Beim Start sagen, was gilt — statt jemanden in die .env schauen zu lassen."""
+        zeilen = report.rows(
+            self.settings, await self.db.list_watches(), self.monitor.profiles
+        )
+        try:
+            await self._deliver_health(
+                report.title(zeilen), report.discord_text(zeilen), report.is_alarm(zeilen)
+            )
+        except Exception:
+            log.exception("Startbericht konnte nicht zugestellt werden.")
 
     async def _health_target(self) -> discord.abc.Messageable | None:
         """Wohin Ausfallmeldungen gehen.
